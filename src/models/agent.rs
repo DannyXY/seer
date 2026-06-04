@@ -93,6 +93,15 @@ pub struct CreateIntentRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvaluateIntentWithAllowanceRequest {
+    pub wallet_address: String,
+    pub raw_intent: String,
+    pub token_address: String,
+    pub owner_address: String,
+    pub spender_address: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateSessionPolicyRequest {
     pub smart_account_address: String,
     pub session_key_address: String,

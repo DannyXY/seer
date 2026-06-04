@@ -3,13 +3,20 @@ use axum::{
     http::HeaderMap,
     Json,
 };
+use ethers_core::types::U256;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::{
     api::auth_guard::require_wallet,
     errors::ApiError,
-    models::agent::{CreateIntentRequest, CreateSessionPolicyRequest, IntentStatus},
+    models::{
+        agent::{
+            CreateIntentRequest, CreateSessionPolicyRequest, EvaluateIntentWithAllowanceRequest,
+            IntentStatus,
+        },
+        execution::Erc20AllowanceRequest,
+    },
     AppState,
 };
 
@@ -47,6 +54,48 @@ pub async fn evaluate_intent(
     Ok(Json(json!(proposal)))
 }
 
+pub async fn evaluate_intent_with_allowance(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<EvaluateIntentWithAllowanceRequest>,
+) -> Result<Json<Value>, ApiError> {
+    require_wallet(&state, &headers, &req.wallet_address)?;
+    let parsed = state.services.agent.parse_intent(&req.raw_intent);
+    let allowance = state
+        .services
+        .contracts
+        .erc20_allowance(Erc20AllowanceRequest {
+            token_address: req.token_address.clone(),
+            owner_address: req.owner_address.clone(),
+            spender_address: req.spender_address.clone(),
+        })
+        .await
+        .map_err(|err| ApiError::BadRequest(err.to_string()))?;
+    let allowance_value = parse_rpc_u256(&allowance.allowance)
+        .map_err(|err| ApiError::BadRequest(format!("invalid allowance value: {err}")))?;
+    let provider = state.services.provider.provider().await;
+    let proposal = state
+        .services
+        .execution
+        .evaluate_intent_with_allowance(
+            provider,
+            CreateIntentRequest {
+                wallet_address: req.wallet_address.clone(),
+                raw_intent: req.raw_intent.clone(),
+            },
+            parsed.clone(),
+            Some(allowance_value),
+        )
+        .await
+        .map_err(|err| ApiError::Service(err.to_string()))?;
+
+    Ok(Json(json!({
+        "parsed_intent": parsed,
+        "allowance": allowance,
+        "proposal": proposal
+    })))
+}
+
 pub async fn create_intent(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -60,6 +109,30 @@ pub async fn create_intent(
         "execution_policy_draft": policy,
         "authorization_model": "user-approved or scoped delegated execution only"
     })))
+}
+
+fn parse_rpc_u256(value: &str) -> anyhow::Result<U256> {
+    let trimmed = value.trim();
+    let digits = trimmed.strip_prefix("0x").unwrap_or(trimmed);
+    if digits.is_empty() {
+        anyhow::bail!("empty value")
+    }
+    Ok(U256::from_str_radix(digits, 16)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_rpc_u256;
+
+    #[test]
+    fn parses_rpc_hex_allowance() {
+        assert_eq!(parse_rpc_u256("0x17d7840").unwrap().as_u64(), 25_000_000);
+    }
+
+    #[test]
+    fn rejects_empty_rpc_allowance() {
+        assert!(parse_rpc_u256("0x").is_err());
+    }
 }
 
 pub async fn intents(

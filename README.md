@@ -110,6 +110,7 @@ POST /api/arena/resolve-due
 
 POST /api/agent/parse-intent
 POST /api/agent/evaluate-intent
+POST /api/agent/evaluate-intent-with-allowance
 POST /api/agent/create-intent
 GET  /api/agent/:address/intents
 GET  /api/agent/intent/:intent_id/reasoning
@@ -136,6 +137,8 @@ intent -> condition evaluation -> execution proposal -> user signs transaction -
 ```
 
 `POST /api/agent/evaluate-intent` evaluates parsed conditions against provider facts and returns an execution proposal.
+
+`POST /api/agent/evaluate-intent-with-allowance` also reads ERC-20 allowance from Mantle RPC and returns the correct next draft: approval calldata when allowance is low, or strategy calldata when allowance already covers the spend.
 
 `POST /api/contracts/send-raw-transaction` relays a complete user-signed transaction through `eth_sendRawTransaction` when `MANTLE_RPC_URL` is configured.
 

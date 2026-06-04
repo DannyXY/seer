@@ -59,6 +59,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/agent/parse-intent", post(agent::parse_intent))
         .route("/api/agent/evaluate-intent", post(agent::evaluate_intent))
+        .route(
+            "/api/agent/evaluate-intent-with-allowance",
+            post(agent::evaluate_intent_with_allowance),
+        )
         .route("/api/agent/create-intent", post(agent::create_intent))
         .route("/api/agent/:address/intents", get(agent::intents))
         .route("/api/agent/intent/:intent_id", get(agent::intent))

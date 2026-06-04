@@ -84,6 +84,7 @@ requires_user_signature = true
 
 ```bash
 curl -X POST http://localhost:10000/api/agent/evaluate-intent \
+  -H 'authorization: Bearer <token>' \
   -H 'content-type: application/json' \
   -d '{
     "wallet_address": "0x1234567890123456789012345678901234567890",
@@ -100,6 +101,23 @@ transaction_draft describes the user-signed Mantle testnet action
 ```
 
 Set `MANTLE_USDC_ADDRESS` and `SEER_APPROVED_STRATEGY_ADDRESS` to receive a concrete `erc20_approve` transaction draft for USDC accumulation intents. Set `SEER_STRATEGY_DEPOSIT_FUNCTION` to the selected protocol's ABI signature, defaulting to `deposit(address,uint256)`, so Seer can draft the next strategy call after allowance is sufficient.
+
+## Evaluate With Live Allowance
+
+```bash
+curl -X POST http://localhost:10000/api/agent/evaluate-intent-with-allowance \
+  -H 'authorization: Bearer <token>' \
+  -H 'content-type: application/json' \
+  -d '{
+    "wallet_address": "0x1234567890123456789012345678901234567890",
+    "raw_intent": "When mETH TVL climbs above 40M and my risk score is below 60, accumulate 25 USDC weekly into mETH",
+    "token_address": "0xToken",
+    "owner_address": "0xWalletOrSmartAccount",
+    "spender_address": "0xStrategy"
+  }'
+```
+
+This evaluates provider conditions and reads ERC-20 allowance from Mantle RPC in one call. The returned proposal gives the next transaction draft: approval if allowance is low, strategy execution if allowance is sufficient.
 
 ## Check ERC-20 Allowance
 
