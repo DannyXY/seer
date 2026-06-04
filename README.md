@@ -32,7 +32,7 @@ Rust Axum backend
 
 ## Durable State
 
-When `DATABASE_URL` is configured, Seer persists created agent intents and agent execution logs to PostgreSQL. If Postgres is not configured, the same API remains usable with in-memory state for local demo reliability.
+When `DATABASE_URL` is configured, Seer persists created agent intents, execution policies, and agent execution logs to PostgreSQL. If Postgres is not configured, the same API remains usable with in-memory state for local demo reliability.
 
 Set `RUN_MIGRATIONS=true` to run SQLx migrations on startup. It defaults to `false` so copying `.env.example` does not break local demo runs when Postgres is not available.
 

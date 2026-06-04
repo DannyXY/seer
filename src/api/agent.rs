@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::{
     api::auth_guard::require_wallet,
-    db::{persist_agent_execution_log, persist_agent_intent},
+    db::{persist_agent_execution_log, persist_agent_execution_policy, persist_agent_intent},
     errors::ApiError,
     models::{
         agent::{
@@ -108,6 +108,9 @@ pub async fn create_intent(
         .await
         .map_err(|err| ApiError::Service(err.to_string()))?;
     let policy = state.services.agent.create_policy(&intent);
+    persist_agent_execution_policy(state.services.infra.postgres.as_ref(), &policy)
+        .await
+        .map_err(|err| ApiError::Service(err.to_string()))?;
     Ok(Json(json!({
         "intent": intent,
         "execution_policy_draft": policy,
@@ -243,6 +246,9 @@ pub async fn create_session_policy(
         .ok_or(ApiError::NotFound)?;
     require_wallet(&state, &headers, &intent.wallet_address)?;
     let policy = state.services.agent.create_session_policy(&intent, req);
+    persist_agent_execution_policy(state.services.infra.postgres.as_ref(), &policy)
+        .await
+        .map_err(|err| ApiError::Service(err.to_string()))?;
 
     Ok(Json(json!({
         "policy": policy,
@@ -311,6 +317,9 @@ pub async fn revoke_policy(
         .agent
         .revoke_policy(policy_id)
         .ok_or(ApiError::NotFound)?;
+    persist_agent_execution_policy(state.services.infra.postgres.as_ref(), &revoked)
+        .await
+        .map_err(|err| ApiError::Service(err.to_string()))?;
 
     Ok(Json(json!({ "policy": revoked })))
 }

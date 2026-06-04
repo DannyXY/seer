@@ -152,8 +152,9 @@ The worker runs interval loops for:
 PostgreSQL is optional for local demo runs but active when `DATABASE_URL` is configured. The current durable slice persists:
 
 - created agent intents into `agent_intents`
+- execution policy drafts and session-key policies into `agent_execution_policies`
 - agent execution logs into `agent_execution_logs`
-- intent lifecycle status changes for activation, pause, and cancellation
+- intent and policy lifecycle status changes for activation, pause, cancellation, and revocation
 
 In-memory state remains the fallback so the MVP can still run when external services are unavailable.
 

@@ -1,9 +1,11 @@
 use redis::Client as RedisClient;
 use serde::Serialize;
-use sqlx::{postgres::PgPoolOptions, PgPool};
+use sqlx::{postgres::PgPoolOptions, types::BigDecimal, PgPool};
 
 use crate::config::Settings;
-use crate::models::agent::{AgentExecutionLog, AgentIntent, IntentExecutionMode, IntentStatus};
+use crate::models::agent::{
+    AgentExecutionLog, AgentIntent, ExecutionPolicy, IntentExecutionMode, IntentStatus,
+};
 
 #[derive(Clone)]
 pub struct Infrastructure {
@@ -146,6 +148,60 @@ pub async fn persist_agent_execution_log(
     Ok(())
 }
 
+pub async fn persist_agent_execution_policy(
+    pool: Option<&PgPool>,
+    policy: &ExecutionPolicy,
+) -> anyhow::Result<()> {
+    let Some(pool) = pool else {
+        return Ok(());
+    };
+
+    sqlx::query(
+        r#"
+        INSERT INTO agent_execution_policies (
+            id,
+            intent_id,
+            wallet_address,
+            allowed_assets,
+            allowed_protocols,
+            max_spend_usd,
+            max_transaction_count,
+            expires_at,
+            status,
+            policy_hash,
+            created_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+        ON CONFLICT (policy_hash) DO UPDATE SET
+            wallet_address = EXCLUDED.wallet_address,
+            allowed_assets = EXCLUDED.allowed_assets,
+            allowed_protocols = EXCLUDED.allowed_protocols,
+            max_spend_usd = EXCLUDED.max_spend_usd,
+            max_transaction_count = EXCLUDED.max_transaction_count,
+            expires_at = EXCLUDED.expires_at,
+            status = EXCLUDED.status
+        "#,
+    )
+    .bind(policy.id)
+    .bind(policy.intent_id)
+    .bind(&policy.wallet_address)
+    .bind(serde_json::to_value(&policy.allowed_assets)?)
+    .bind(serde_json::to_value(&policy.allowed_protocols)?)
+    .bind(
+        policy
+            .max_spend_usd
+            .and_then(|value| BigDecimal::try_from(value).ok()),
+    )
+    .bind(policy.max_transaction_count.map(|value| value as i32))
+    .bind(policy.expires_at)
+    .bind(intent_status_label(&policy.status))
+    .bind(&policy.policy_hash)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
 fn intent_status_label(status: &IntentStatus) -> &'static str {
     match status {
         IntentStatus::Draft => "DRAFT",
@@ -171,7 +227,7 @@ mod tests {
         config::{AppRole, Settings},
         db::{
             execution_mode_label, intent_status_label, persist_agent_execution_log,
-            persist_agent_intent, Infrastructure,
+            persist_agent_execution_policy, persist_agent_intent, Infrastructure,
         },
         models::agent::{CreateIntentRequest, IntentExecutionMode, IntentStatus},
         services::agent::AgentService,
@@ -198,6 +254,9 @@ mod tests {
         };
         let log = service.record_execution_log(&intent, proposal);
         persist_agent_execution_log(None, &log).await.unwrap();
+
+        let policy = service.create_policy(&intent);
+        persist_agent_execution_policy(None, &policy).await.unwrap();
     }
 
     #[test]
