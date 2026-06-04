@@ -150,6 +150,8 @@ curl http://localhost:10000/api/contracts/execution-readiness
 
 Use this before demoing named protocol execution. A protocol is only ready for strategy drafts when its strategy address is configured.
 
+If the intent names Merchant Moe, Lendle, or Agni Finance and that destination is not configured, Seer returns a non-runnable recommendation instead of falling back to a generic strategy address.
+
 ## Relay User-Signed Transaction
 
 ```bash

@@ -355,10 +355,7 @@ impl ExecutionService {
                     value: "0".to_string(),
                     data: None,
                     chain_id: self.chain_id,
-                    human_summary: format!(
-                        "Prepare a user-signed Mantle testnet action for assets {:?} through approved protocols {:?}. Configure token and strategy addresses to emit runnable calldata.",
-                        parsed.target_assets, parsed.target_protocols
-                    ),
+                    human_summary: self.missing_strategy_summary(parsed),
                 })),
             "reduce_exposure" => Some(TransactionDraft {
                 kind: "exit_or_reduce_position".to_string(),
@@ -429,29 +426,49 @@ impl ExecutionService {
     }
 
     fn strategy_for_intent(&self, parsed: &ParsedIntent) -> Option<ProtocolStrategy> {
-        parsed
+        let requested_config_required_protocol = parsed
             .target_protocols
             .iter()
-            .find_map(|protocol| {
-                self.action_config
-                    .protocol_strategies
-                    .get(protocol)
-                    .cloned()
-            })
-            .or_else(|| {
-                self.action_config
-                    .approved_strategy_address
-                    .as_ref()
-                    .map(|address| ProtocolStrategy {
-                        address: address.clone(),
-                        deposit_function: self.action_config.strategy_deposit_function.clone(),
-                    })
+            .find(|protocol| protocol_requires_explicit_config(protocol));
+        if let Some(protocol) = requested_config_required_protocol {
+            return self
+                .action_config
+                .protocol_strategies
+                .get(protocol)
+                .cloned();
+        }
+
+        self.action_config
+            .approved_strategy_address
+            .as_ref()
+            .map(|address| ProtocolStrategy {
+                address: address.clone(),
+                deposit_function: self.action_config.strategy_deposit_function.clone(),
             })
     }
 
     fn spend_units(&self, parsed: &ParsedIntent) -> Option<U256> {
         let spend = parsed.spend_amount.as_ref()?;
         decimal_amount_to_units(spend.amount, token_decimals(&spend.asset))
+    }
+
+    fn missing_strategy_summary(&self, parsed: &ParsedIntent) -> String {
+        let requested_known_protocols: Vec<_> = parsed
+            .target_protocols
+            .iter()
+            .filter(|protocol| protocol_requires_explicit_config(protocol))
+            .cloned()
+            .collect();
+        if !requested_known_protocols.is_empty() {
+            return format!(
+                "Protocol destination {:?} is named in the intent but not configured. Configure the matching strategy address and deposit function before emitting runnable calldata.",
+                requested_known_protocols
+            );
+        }
+        format!(
+            "Prepare a user-signed Mantle testnet action for assets {:?} through approved protocols {:?}. Configure token and strategy addresses to emit runnable calldata.",
+            parsed.target_assets, parsed.target_protocols
+        )
     }
 }
 
@@ -464,6 +481,10 @@ fn token_decimals(asset: &str) -> u32 {
 
 fn known_protocols() -> [&'static str; 4] {
     ["Merchant Moe", "Lendle", "Agni Finance", "mETH Protocol"]
+}
+
+fn protocol_requires_explicit_config(protocol: &str) -> bool {
+    matches!(protocol, "Merchant Moe" | "Lendle" | "Agni Finance")
 }
 
 fn protocol_strategies_from_settings(settings: &Settings) -> HashMap<String, ProtocolStrategy> {
@@ -715,6 +736,70 @@ mod tests {
             draft.human_summary,
             "Approve 25 USDC for strategy contract 0x0000000000000000000000000000000000000003 on Mantle testnet."
         );
+    }
+
+    #[tokio::test]
+    async fn explicit_unconfigured_protocol_does_not_use_generic_strategy() {
+        let agent = AgentService::new();
+        let mut settings = Settings::from_env().unwrap();
+        settings.mantle_usdc_address =
+            Some("0x0000000000000000000000000000000000000001".to_string());
+        settings.approved_strategy_address =
+            Some("0x0000000000000000000000000000000000000002".to_string());
+        let execution = ExecutionService::new(settings);
+        let request = CreateIntentRequest {
+            wallet_address: "0x123".to_string(),
+            raw_intent:
+                "When mETH TVL climbs above 40M, accumulate 25 USDC weekly into Merchant Moe"
+                    .to_string(),
+        };
+        let parsed = agent.parse_intent(&request.raw_intent);
+        let provider: &dyn OnchainDataProvider = &MockProvider;
+        let proposal = execution
+            .evaluate_intent(provider, request, parsed)
+            .await
+            .unwrap();
+        let draft = proposal.transaction_draft.unwrap();
+
+        assert_eq!(draft.kind, "swap_or_strategy_deposit");
+        assert!(draft.to.is_none());
+        assert!(draft.data.is_none());
+        assert!(draft
+            .human_summary
+            .contains("named in the intent but not configured"));
+    }
+
+    #[tokio::test]
+    async fn explicit_unconfigured_protocol_with_allowance_does_not_build_deposit() {
+        let agent = AgentService::new();
+        let mut settings = Settings::from_env().unwrap();
+        settings.mantle_usdc_address =
+            Some("0x0000000000000000000000000000000000000001".to_string());
+        settings.approved_strategy_address =
+            Some("0x0000000000000000000000000000000000000002".to_string());
+        let execution = ExecutionService::new(settings);
+        let request = CreateIntentRequest {
+            wallet_address: "0x123".to_string(),
+            raw_intent:
+                "When mETH TVL climbs above 40M, accumulate 25 USDC weekly into Merchant Moe"
+                    .to_string(),
+        };
+        let parsed = agent.parse_intent(&request.raw_intent);
+        let provider: &dyn OnchainDataProvider = &MockProvider;
+        let proposal = execution
+            .evaluate_intent_with_allowance(
+                provider,
+                request,
+                parsed,
+                Some(U256::from(25_000_000u64)),
+            )
+            .await
+            .unwrap();
+        let draft = proposal.transaction_draft.unwrap();
+
+        assert_eq!(draft.kind, "allowance_sufficient");
+        assert!(draft.to.is_none());
+        assert!(draft.data.is_none());
     }
 
     #[test]

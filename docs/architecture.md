@@ -227,6 +227,8 @@ Each destination can override the default function signature with its matching `
 
 `GET /api/contracts/execution-readiness` exposes which token and protocol destinations are configured, so demos and operators can see whether named protocol execution is genuinely available.
 
+If an intent explicitly names Merchant Moe, Lendle, or Agni Finance, Seer requires that protocol's destination configuration. It does not silently route those intents to the generic strategy address. Asset-only mETH intents may still use the generic strategy unless `SEER_METH_STRATEGY_ADDRESS` is configured.
+
 Protocol-specific hardening still remains explicit. Production builders should be added per protocol with ABI, quote, slippage, allowance, and risk checks.
 
 Seer can also call ERC-20 `allowance(owner, spender)` through Mantle RPC. If allowance already covers the intended spend amount, approval is skipped and the configured strategy call can be produced.
