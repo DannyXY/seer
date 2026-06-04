@@ -22,6 +22,7 @@ pub struct Settings {
     pub mantle_mnt_address: Option<String>,
     pub mantle_meth_address: Option<String>,
     pub approved_strategy_address: Option<String>,
+    pub strategy_deposit_function: String,
     pub arena_points_address: Option<String>,
     pub prediction_registry_address: Option<String>,
     pub identity_sbt_address: Option<String>,
@@ -74,6 +75,10 @@ impl Settings {
             mantle_mnt_address: env_opt("MANTLE_MNT_ADDRESS"),
             mantle_meth_address: env_opt("MANTLE_METH_ADDRESS"),
             approved_strategy_address: env_opt("SEER_APPROVED_STRATEGY_ADDRESS"),
+            strategy_deposit_function: env_or(
+                "SEER_STRATEGY_DEPOSIT_FUNCTION",
+                "deposit(address,uint256)",
+            ),
             arena_points_address: env_opt("SEER_ARENA_POINTS_ADDRESS"),
             prediction_registry_address: env_opt("SEER_PREDICTION_REGISTRY_ADDRESS"),
             identity_sbt_address: env_opt("SEER_IDENTITY_SBT_ADDRESS"),

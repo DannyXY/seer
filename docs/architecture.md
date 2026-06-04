@@ -180,13 +180,22 @@ Provider-specific work remains explicit: a smart-account SDK must build/sign the
 
 ## Action Builder
 
-Seer includes a first concrete transaction builder for ERC-20 approvals. If token and strategy addresses are configured, an accumulate intent such as `accumulate 25 USDC weekly` can produce runnable Mantle calldata:
+Seer includes concrete transaction builders for ERC-20 approvals and a configurable strategy deposit call. If token and strategy addresses are configured, an accumulate intent such as `accumulate 25 USDC weekly` can produce runnable Mantle calldata:
 
 ```text
 to = MANTLE_USDC_ADDRESS
 data = approve(SEER_APPROVED_STRATEGY_ADDRESS, 25 USDC units)
 ```
 
-This is the first step before protocol-specific swap/deposit builders. Those builders should be added per protocol with ABI, quote, slippage, allowance, and risk checks.
+After allowance is sufficient, Seer can draft the next strategy call:
 
-Seer can also call ERC-20 `allowance(owner, spender)` through Mantle RPC. If allowance already covers the intended spend amount, approval is skipped.
+```text
+to = SEER_APPROVED_STRATEGY_ADDRESS
+data = deposit(MANTLE_USDC_ADDRESS, 25 USDC units)
+```
+
+The deposit ABI is configured with `SEER_STRATEGY_DEPOSIT_FUNCTION`, defaulting to `deposit(address,uint256)`.
+
+Protocol-specific hardening still remains explicit. Production builders should be added per protocol with ABI, quote, slippage, allowance, and risk checks.
+
+Seer can also call ERC-20 `allowance(owner, spender)` through Mantle RPC. If allowance already covers the intended spend amount, approval is skipped and the configured strategy call can be produced.

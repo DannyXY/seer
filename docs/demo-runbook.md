@@ -99,7 +99,7 @@ conditions include observed provider values
 transaction_draft describes the user-signed Mantle testnet action
 ```
 
-Set `MANTLE_USDC_ADDRESS` and `SEER_APPROVED_STRATEGY_ADDRESS` to receive a concrete `erc20_approve` transaction draft for USDC accumulation intents.
+Set `MANTLE_USDC_ADDRESS` and `SEER_APPROVED_STRATEGY_ADDRESS` to receive a concrete `erc20_approve` transaction draft for USDC accumulation intents. Set `SEER_STRATEGY_DEPOSIT_FUNCTION` to the selected protocol's ABI signature, defaulting to `deposit(address,uint256)`, so Seer can draft the next strategy call after allowance is sufficient.
 
 ## Check ERC-20 Allowance
 
@@ -113,6 +113,8 @@ curl -X POST http://localhost:10000/api/contracts/erc20-allowance \
     "spender_address": "0xStrategy"
   }'
 ```
+
+If allowance covers the intended spend amount, Seer can draft the configured strategy call instead of another approval.
 
 ## Mantle RPC Readiness
 

@@ -31,6 +31,7 @@ pub struct ExecutionService {
 struct ActionConfig {
     token_addresses: HashMap<String, String>,
     approved_strategy_address: Option<String>,
+    strategy_deposit_function: String,
 }
 
 impl ExecutionService {
@@ -49,6 +50,7 @@ impl ExecutionService {
             action_config: ActionConfig {
                 token_addresses,
                 approved_strategy_address: settings.approved_strategy_address,
+                strategy_deposit_function: settings.strategy_deposit_function,
             },
         }
     }
@@ -121,16 +123,20 @@ impl ExecutionService {
                     .spend_units(&parsed)
                     .is_some_and(|required| allowance >= required)
                 {
-                    proposal.transaction_draft = Some(TransactionDraft {
-                        kind: "allowance_sufficient".to_string(),
-                        to: None,
-                        value: "0".to_string(),
-                        data: None,
-                        chain_id: self.chain_id,
-                        human_summary:
-                            "Existing ERC-20 allowance is sufficient; approval transaction is not needed."
-                                .to_string(),
-                    });
+                    proposal.transaction_draft =
+                        self.build_strategy_deposit_draft(&parsed)
+                            .or_else(|| {
+                                Some(TransactionDraft {
+                                    kind: "allowance_sufficient".to_string(),
+                                    to: None,
+                                    value: "0".to_string(),
+                                    data: None,
+                                    chain_id: self.chain_id,
+                                    human_summary:
+                                        "Existing ERC-20 allowance is sufficient; approval transaction is not needed."
+                                            .to_string(),
+                                })
+                            });
                 }
             }
         }
@@ -358,6 +364,38 @@ impl ExecutionService {
         })
     }
 
+    fn build_strategy_deposit_draft(&self, parsed: &ParsedIntent) -> Option<TransactionDraft> {
+        let spend = parsed.spend_amount.as_ref()?;
+        let token_address = self.action_config.token_addresses.get(&spend.asset)?;
+        let strategy = self.action_config.approved_strategy_address.as_ref()?;
+        let token = Address::from_str(token_address).ok()?;
+        let strategy_address = Address::from_str(strategy).ok()?;
+        let amount = self.spend_units(parsed)?;
+        let signature = self
+            .action_config
+            .strategy_deposit_function
+            .trim()
+            .to_string();
+        if signature.is_empty() || !signature.contains("(address,uint256)") {
+            return None;
+        }
+
+        let mut data = id(&signature)[..4].to_vec();
+        data.extend(encode(&[Token::Address(token), Token::Uint(amount)]));
+
+        Some(TransactionDraft {
+            kind: "strategy_deposit".to_string(),
+            to: Some(format!("{strategy_address:?}").to_lowercase()),
+            value: "0".to_string(),
+            data: Some(format!("0x{}", hex_encode(&data))),
+            chain_id: self.chain_id,
+            human_summary: format!(
+                "Execute {} {} into strategy contract {} on Mantle testnet using {}.",
+                spend.amount, spend.asset, strategy, signature
+            ),
+        })
+    }
+
     fn spend_units(&self, parsed: &ParsedIntent) -> Option<U256> {
         let spend = parsed.spend_amount.as_ref()?;
         decimal_amount_to_units(spend.amount, token_decimals(&spend.asset))
@@ -513,6 +551,7 @@ mod tests {
             Some("0x0000000000000000000000000000000000000001".to_string());
         settings.approved_strategy_address =
             Some("0x0000000000000000000000000000000000000002".to_string());
+        settings.strategy_deposit_function = "deposit(address,uint256)".to_string();
         let execution = ExecutionService::new(settings);
         let request = CreateIntentRequest {
             wallet_address: "0x123".to_string(),
@@ -537,13 +576,49 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn skips_approval_transaction_when_allowance_is_sufficient() {
+    async fn builds_strategy_deposit_when_allowance_is_sufficient() {
         let agent = AgentService::new();
         let mut settings = Settings::from_env().unwrap();
         settings.mantle_usdc_address =
             Some("0x0000000000000000000000000000000000000001".to_string());
         settings.approved_strategy_address =
             Some("0x0000000000000000000000000000000000000002".to_string());
+        let execution = ExecutionService::new(settings);
+        let request = CreateIntentRequest {
+            wallet_address: "0x123".to_string(),
+            raw_intent: "When mETH TVL climbs above 40M, accumulate 25 USDC weekly into mETH"
+                .to_string(),
+        };
+        let parsed = agent.parse_intent(&request.raw_intent);
+        let provider: &dyn OnchainDataProvider = &MockProvider;
+        let proposal = execution
+            .evaluate_intent_with_allowance(
+                provider,
+                request,
+                parsed,
+                Some(U256::from(25_000_000u64)),
+            )
+            .await
+            .unwrap();
+        let draft = proposal.transaction_draft.unwrap();
+
+        assert_eq!(draft.kind, "strategy_deposit");
+        assert_eq!(
+            draft.to,
+            Some("0x0000000000000000000000000000000000000002".to_string())
+        );
+        assert!(draft.data.unwrap().starts_with("0x47e7ef24"));
+    }
+
+    #[tokio::test]
+    async fn falls_back_when_strategy_signature_is_not_supported() {
+        let agent = AgentService::new();
+        let mut settings = Settings::from_env().unwrap();
+        settings.mantle_usdc_address =
+            Some("0x0000000000000000000000000000000000000001".to_string());
+        settings.approved_strategy_address =
+            Some("0x0000000000000000000000000000000000000002".to_string());
+        settings.strategy_deposit_function = "deposit(uint256)".to_string();
         let execution = ExecutionService::new(settings);
         let request = CreateIntentRequest {
             wallet_address: "0x123".to_string(),

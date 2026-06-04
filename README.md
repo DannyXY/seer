@@ -158,11 +158,12 @@ MANTLE_USDT_ADDRESS=
 MANTLE_MNT_ADDRESS=
 MANTLE_METH_ADDRESS=
 SEER_APPROVED_STRATEGY_ADDRESS=
+SEER_STRATEGY_DEPOSIT_FUNCTION=deposit(address,uint256)
 ```
 
 For example, `accumulate 25 USDC` can produce an `erc20_approve` draft with `to=<USDC token>` and `data=approve(strategy, 25 USDC units)`.
 
-`POST /api/contracts/erc20-allowance` checks existing token allowance through Mantle RPC. When allowance is already sufficient, Seer can skip the approval transaction and move to the protocol-specific action.
+`POST /api/contracts/erc20-allowance` checks existing token allowance through Mantle RPC. When allowance is already sufficient, Seer can skip the approval transaction and build a configured strategy call such as `deposit(address,uint256)` with `to=<strategy>` and `data=deposit(token, amount)`.
 
 ## Recurring Automation
 
