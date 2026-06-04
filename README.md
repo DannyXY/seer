@@ -267,4 +267,4 @@ Recommended mapping from `nansen-ai/nansen-skills`:
 - `nansen-token` -> Token flow signals
 - `nansen-portfolio` -> Portfolio positions and wallet summary
 
-The current `NansenProvider` is scaffolded. Until live credentials and output schemas are wired, `MockProvider` provides deterministic Mantle-oriented demo intelligence.
+The current `NansenProvider` wires Nansen's `portfolio/defi-holdings` endpoint for wallet positions and wallet profile summaries. Smart-money, token-flow, transaction, and protocol metric methods still fall back through `ProviderRegistry` until their live response schemas are mapped. `MockProvider` remains the deterministic Mantle-oriented demo fallback.

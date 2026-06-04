@@ -1,5 +1,7 @@
 use async_trait::async_trait;
 use chrono::Utc;
+use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
+use serde_json::{json, Value};
 use thiserror::Error;
 use tracing::warn;
 
@@ -44,8 +46,12 @@ impl ProviderRegistry {
             .nansen_api_key
             .clone()
             .map(|api_key| NansenProvider {
+                client: reqwest::Client::new(),
                 api_key,
-                base_url: settings.nansen_base_url.clone(),
+                base_url: settings
+                    .nansen_base_url
+                    .clone()
+                    .unwrap_or_else(|| "https://api.nansen.ai/api/v1".to_string()),
                 cli_path: settings.nansen_cli_path.clone(),
             });
         Self {
@@ -143,33 +149,96 @@ impl OnchainDataProvider for ProviderRegistry {
 }
 
 pub struct NansenProvider {
+    client: reqwest::Client,
     api_key: String,
-    base_url: Option<String>,
+    base_url: String,
     cli_path: String,
+}
+
+impl NansenProvider {
+    async fn post_json(&self, path: &str, body: Value) -> Result<Value, DataProviderError> {
+        let url = format!(
+            "{}/{}",
+            self.base_url.trim_end_matches('/'),
+            path.trim_start_matches('/')
+        );
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.insert(
+            "apiKey",
+            HeaderValue::from_str(&self.api_key)
+                .map_err(|err| DataProviderError::Unavailable(err.to_string()))?,
+        );
+
+        let response = self
+            .client
+            .post(url)
+            .headers(headers)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|err| DataProviderError::Unavailable(err.to_string()))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(DataProviderError::Unavailable(format!(
+                "Nansen HTTP {status}: {body}"
+            )));
+        }
+
+        response
+            .json::<Value>()
+            .await
+            .map_err(|err| DataProviderError::Unavailable(err.to_string()))
+    }
+
+    async fn defi_holdings(
+        &self,
+        address: &str,
+    ) -> Result<Vec<PortfolioPosition>, DataProviderError> {
+        let payload = self
+            .post_json(
+                "/portfolio/defi-holdings",
+                json!({
+                    "wallet_address": address
+                }),
+            )
+            .await?;
+        Ok(parse_defi_holdings_positions(&payload))
+    }
 }
 
 #[async_trait]
 impl OnchainDataProvider for NansenProvider {
     async fn get_wallet_profile(&self, address: &str) -> Result<WalletProfile, DataProviderError> {
-        let _ = (&self.api_key, &self.base_url, &self.cli_path);
-        Err(DataProviderError::Unavailable(format!(
-            "Nansen provider scaffolded for {address}; wire nansen-cli/API output mapping next"
-        )))
+        let positions = self.defi_holdings(address).await?;
+        let protocols_used = unique_protocols(&positions);
+        let portfolio_value_usd = positions.iter().map(|position| position.usd_value).sum();
+        Ok(WalletProfile {
+            address: address.to_string(),
+            network: "mantle".to_string(),
+            labels: vec!["nansen-defi-holdings".to_string()],
+            portfolio_value_usd,
+            wallet_age_days: 0,
+            transaction_count: 0,
+            protocols_used,
+            risk_score: risk_score_from_positions(&positions),
+        })
     }
 
     async fn get_wallet_positions(
         &self,
         address: &str,
     ) -> Result<Vec<PortfolioPosition>, DataProviderError> {
-        Err(DataProviderError::Unavailable(format!(
-            "Nansen positions not wired for {address}"
-        )))
+        self.defi_holdings(address).await
     }
 
     async fn get_wallet_transactions(
         &self,
         address: &str,
     ) -> Result<Vec<WalletTransaction>, DataProviderError> {
+        let _ = &self.cli_path;
         Err(DataProviderError::Unavailable(format!(
             "Nansen transactions not wired for {address}"
         )))
@@ -199,6 +268,145 @@ impl OnchainDataProvider for NansenProvider {
             protocol
         )))
     }
+}
+
+fn parse_defi_holdings_positions(payload: &Value) -> Vec<PortfolioPosition> {
+    candidate_rows(payload)
+        .into_iter()
+        .filter_map(position_from_value)
+        .collect()
+}
+
+fn candidate_rows(payload: &Value) -> Vec<&Value> {
+    if let Some(array) = payload.as_array() {
+        return array.iter().collect();
+    }
+    for key in [
+        "data",
+        "result",
+        "results",
+        "holdings",
+        "items",
+        "rows",
+        "positions",
+    ] {
+        if let Some(value) = payload.get(key) {
+            let rows = candidate_rows(value);
+            if !rows.is_empty() {
+                return rows;
+            }
+        }
+    }
+    Vec::new()
+}
+
+fn position_from_value(value: &Value) -> Option<PortfolioPosition> {
+    let symbol = first_string(
+        value,
+        &[
+            &["symbol"],
+            &["token_symbol"],
+            &["asset_symbol"],
+            &["token", "symbol"],
+            &["asset", "symbol"],
+        ],
+    )?;
+    let amount = first_string(
+        value,
+        &[&["amount"], &["balance"], &["quantity"], &["token_amount"]],
+    )
+    .or_else(|| {
+        first_f64(
+            value,
+            &[&["amount"], &["balance"], &["quantity"], &["token_amount"]],
+        )
+        .map(|value| value.to_string())
+    })
+    .unwrap_or_else(|| "0".to_string());
+    let usd_value = first_f64(
+        value,
+        &[
+            &["usd_value"],
+            &["value_usd"],
+            &["value"],
+            &["balance_usd"],
+            &["token", "value_usd"],
+        ],
+    )
+    .unwrap_or(0.0);
+    let protocol = first_string(
+        value,
+        &[
+            &["protocol"],
+            &["protocol_name"],
+            &["project"],
+            &["project_name"],
+            &["app"],
+            &["app_name"],
+            &["protocol", "name"],
+        ],
+    );
+
+    Some(PortfolioPosition {
+        symbol,
+        amount,
+        usd_value,
+        protocol,
+    })
+}
+
+fn first_string(value: &Value, paths: &[&[&str]]) -> Option<String> {
+    paths.iter().find_map(|path| {
+        path_value(value, path).and_then(|value| {
+            value
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        })
+    })
+}
+
+fn first_f64(value: &Value, paths: &[&[&str]]) -> Option<f64> {
+    paths.iter().find_map(|path| {
+        path_value(value, path).and_then(|value| {
+            value.as_f64().or_else(|| {
+                value
+                    .as_str()
+                    .and_then(|raw| raw.replace(',', "").parse().ok())
+            })
+        })
+    })
+}
+
+fn path_value<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Value> {
+    path.iter()
+        .try_fold(value, |current, key| current.get(*key))
+}
+
+fn unique_protocols(positions: &[PortfolioPosition]) -> Vec<String> {
+    let mut protocols = Vec::new();
+    for position in positions {
+        if let Some(protocol) = &position.protocol {
+            if !protocols.iter().any(|seen| seen == protocol) {
+                protocols.push(protocol.clone());
+            }
+        }
+    }
+    protocols
+}
+
+fn risk_score_from_positions(positions: &[PortfolioPosition]) -> u8 {
+    let total: f64 = positions.iter().map(|position| position.usd_value).sum();
+    if total <= 0.0 {
+        return 50;
+    }
+    let largest = positions
+        .iter()
+        .map(|position| position.usd_value)
+        .fold(0.0, f64::max);
+    let concentration = (largest / total * 100.0).round();
+    concentration.clamp(20.0, 95.0) as u8
 }
 
 pub struct MockProvider;
@@ -305,9 +513,14 @@ impl OnchainDataProvider for MockProvider {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use crate::{
         config::{AppRole, Settings},
-        services::data_provider::{OnchainDataProvider, ProviderRegistry},
+        services::data_provider::{
+            parse_defi_holdings_positions, risk_score_from_positions, OnchainDataProvider,
+            ProviderRegistry,
+        },
     };
 
     fn settings_with_nansen() -> Settings {
@@ -373,5 +586,46 @@ mod tests {
 
         assert_eq!(metrics.protocol, "mETH Protocol");
         assert_eq!(metrics.risk_score, 46);
+    }
+
+    #[test]
+    fn parses_nansen_defi_holdings_positions_from_data_array() {
+        let payload = json!({
+            "data": [
+                {
+                    "token": { "symbol": "USDC" },
+                    "balance": "25.5",
+                    "value_usd": 25.5,
+                    "protocol": { "name": "Merchant Moe" }
+                },
+                {
+                    "asset_symbol": "mETH",
+                    "amount": 1.2,
+                    "usd_value": "4200.50",
+                    "protocol_name": "mETH Protocol"
+                }
+            ]
+        });
+
+        let positions = parse_defi_holdings_positions(&payload);
+
+        assert_eq!(positions.len(), 2);
+        assert_eq!(positions[0].symbol, "USDC");
+        assert_eq!(positions[0].amount, "25.5");
+        assert_eq!(positions[0].protocol.as_deref(), Some("Merchant Moe"));
+        assert_eq!(positions[1].symbol, "mETH");
+        assert_eq!(positions[1].usd_value, 4200.50);
+    }
+
+    #[test]
+    fn derives_position_concentration_risk_score() {
+        let positions = parse_defi_holdings_positions(&json!({
+            "holdings": [
+                { "symbol": "USDC", "amount": "50", "value_usd": 50 },
+                { "symbol": "MNT", "amount": "50", "value_usd": 50 }
+            ]
+        }));
+
+        assert_eq!(risk_score_from_positions(&positions), 50);
     }
 }

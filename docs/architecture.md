@@ -41,6 +41,12 @@ Providers are represented behind `OnchainDataProvider`:
 
 `ProviderRegistry` is the runtime provider facade. If Nansen is configured but a method is unavailable or fails, that method falls back to `MockProvider`. This keeps wallet summaries, signals, identity generation, and intent condition checks available during demo or partial provider outages.
 
+Nansen `portfolio/defi-holdings` is wired for wallet positions and profile summaries. The remaining Nansen surfaces should be mapped next:
+
+- smart-money holdings for signal generation
+- token holder/flow data for asset movement signals
+- protocol metrics for TVL, APY, and risk conditions
+
 ## Intent Execution
 
 Intent execution is not wallet custody.
