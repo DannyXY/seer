@@ -30,6 +30,10 @@ Rust Axum backend
 - Scoped execution policies for delegated automation
 - Intent, reasoning, and policy hash anchoring
 
+## Durable State
+
+When `DATABASE_URL` is configured, Seer persists created agent intents and agent execution logs to PostgreSQL. If Postgres is not configured, the same API remains usable with in-memory state for local demo reliability.
+
 ## Important Execution Rule
 
 Seer does not require broad wallet custody.
@@ -39,6 +43,8 @@ Agent execution is modeled as:
 ```text
 intent -> parsed trigger -> execution policy -> user approval or scoped delegated permission -> execution log
 ```
+
+Seer does not store user funds. User funds remain in the user's wallet or smart account until a user-signed transaction or authorized session-key user operation executes against the destination protocol contract.
 
 Supported trigger modes:
 
@@ -57,6 +63,8 @@ commit up to 25 USDC weekly into the approved mETH strategy.
 The parser accepts common trigger variants such as `climbs to`, `reaches`, `crosses`, `exceeds`, `at least`, `below`, `under`, `at most`, `recurring`, and `recurrent`.
 
 This becomes a policy with allowed assets, allowed protocols, spend caps, expiry, and a policy hash that can be registered on-chain.
+
+Named Mantle destinations such as Merchant Moe, Lendle, Agni Finance, and mETH Protocol can be configured with protocol-specific strategy addresses and deposit function signatures. Without those real protocol addresses/ABIs, Seer can evaluate and recommend but cannot honestly claim protocol-specific execution.
 
 ## AI Reasoning
 

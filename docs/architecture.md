@@ -141,6 +141,16 @@ The worker runs interval loops for:
 - Arena prediction generation every 15 minutes
 - wallet cohort benchmark refresh every hour
 
+## Persistence
+
+PostgreSQL is optional for local demo runs but active when `DATABASE_URL` is configured. The current durable slice persists:
+
+- created agent intents into `agent_intents`
+- agent execution logs into `agent_execution_logs`
+- intent lifecycle status changes for activation, pause, and cancellation
+
+In-memory state remains the fallback so the MVP can still run when external services are unavailable.
+
 ## Actionability
 
 Seer should not stop at insight cards.
@@ -199,6 +209,15 @@ data = deposit(MANTLE_USDC_ADDRESS, 25 USDC units)
 ```
 
 The deposit ABI is configured with `SEER_STRATEGY_DEPOSIT_FUNCTION`, defaulting to `deposit(address,uint256)`.
+
+If the parsed intent names a configured protocol, Seer routes the strategy call to that protocol-specific destination first:
+
+- `SEER_MERCHANT_MOE_STRATEGY_ADDRESS`
+- `SEER_LENDLE_STRATEGY_ADDRESS`
+- `SEER_AGNI_STRATEGY_ADDRESS`
+- `SEER_METH_STRATEGY_ADDRESS`
+
+Each destination can override the default function signature with its matching `*_DEPOSIT_FUNCTION` variable.
 
 Protocol-specific hardening still remains explicit. Production builders should be added per protocol with ABI, quote, slippage, allowance, and risk checks.
 

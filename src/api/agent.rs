@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::{
     api::auth_guard::require_wallet,
+    db::{persist_agent_execution_log, persist_agent_intent},
     errors::ApiError,
     models::{
         agent::{
@@ -103,6 +104,9 @@ pub async fn create_intent(
 ) -> Result<Json<Value>, ApiError> {
     require_wallet(&state, &headers, &req.wallet_address)?;
     let intent = state.services.agent.create_intent(req);
+    persist_agent_intent(state.services.infra.postgres.as_ref(), &intent)
+        .await
+        .map_err(|err| ApiError::Service(err.to_string()))?;
     let policy = state.services.agent.create_policy(&intent);
     Ok(Json(json!({
         "intent": intent,
@@ -212,6 +216,12 @@ pub async fn activate(
         .await
         .map_err(|err| ApiError::Service(err.to_string()))?;
     let execution_log = state.services.agent.record_execution_log(&intent, proposal);
+    persist_agent_intent(state.services.infra.postgres.as_ref(), &intent)
+        .await
+        .map_err(|err| ApiError::Service(err.to_string()))?;
+    persist_agent_execution_log(state.services.infra.postgres.as_ref(), &execution_log)
+        .await
+        .map_err(|err| ApiError::Service(err.to_string()))?;
 
     Ok(Json(json!({
         "intent": intent,
@@ -271,6 +281,9 @@ pub async fn delegated_execute(
             .execution
             .build_delegated_execution(&intent, &policy, proposal.clone());
     let execution_log = state.services.agent.record_execution_log(&intent, proposal);
+    persist_agent_execution_log(state.services.infra.postgres.as_ref(), &execution_log)
+        .await
+        .map_err(|err| ApiError::Service(err.to_string()))?;
 
     if result.executable {
         state.services.agent.mark_policy_used(policy.id);
@@ -318,6 +331,9 @@ pub async fn pause(
         .agent
         .update_status(intent_id, IntentStatus::Paused)
         .ok_or(ApiError::NotFound)?;
+    persist_agent_intent(state.services.infra.postgres.as_ref(), &intent)
+        .await
+        .map_err(|err| ApiError::Service(err.to_string()))?;
     Ok(Json(json!({ "intent": intent })))
 }
 
@@ -337,5 +353,8 @@ pub async fn stop(
         .agent
         .update_status(intent_id, IntentStatus::Cancelled)
         .ok_or(ApiError::NotFound)?;
+    persist_agent_intent(state.services.infra.postgres.as_ref(), &intent)
+        .await
+        .map_err(|err| ApiError::Service(err.to_string()))?;
     Ok(Json(json!({ "intent": intent })))
 }

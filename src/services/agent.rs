@@ -394,6 +394,15 @@ fn infer_protocols(normalized: &str) -> Vec<String> {
     if normalized.contains("agni") {
         protocols.push("Agni Finance".to_string());
     }
+    if normalized.contains("merchant moe")
+        || normalized.contains("merchantmoe")
+        || normalized.contains("moe")
+    {
+        protocols.push("Merchant Moe".to_string());
+    }
+    if normalized.contains("lendle") {
+        protocols.push("Lendle".to_string());
+    }
     if normalized.contains("meth") {
         protocols.push("mETH Protocol".to_string());
     }
@@ -403,6 +412,13 @@ fn infer_protocols(normalized: &str) -> Vec<String> {
 fn infer_subject(normalized: &str) -> String {
     if normalized.contains("meth") {
         "mETH".to_string()
+    } else if normalized.contains("lendle") {
+        "Lendle".to_string()
+    } else if normalized.contains("merchant moe")
+        || normalized.contains("merchantmoe")
+        || normalized.contains("moe")
+    {
+        "Merchant Moe".to_string()
     } else if normalized.contains("mnt") {
         "MNT".to_string()
     } else if normalized.contains("agni") {
@@ -648,6 +664,20 @@ mod tests {
         assert_eq!(parsed.trigger.conditions[0].metric, "risk_score");
         assert_eq!(parsed.trigger.conditions[0].operator, "less_than_or_equal");
         assert_eq!(parsed.trigger.conditions[0].value["amount"], json!(45.0));
+    }
+
+    #[test]
+    fn parses_named_destination_protocols() {
+        let service = AgentService::new();
+        let merchant_moe = service
+            .parse_intent("Accumulate 25 USDC weekly into Merchant Moe when mETH TVL exceeds 50M");
+        let lendle = service.parse_intent("If Lendle risk level is at most 40, buy 10 USDC");
+
+        assert!(merchant_moe
+            .target_protocols
+            .contains(&"Merchant Moe".to_string()));
+        assert!(lendle.target_protocols.contains(&"Lendle".to_string()));
+        assert_eq!(lendle.trigger.conditions[0].subject, "Lendle");
     }
 
     #[test]
