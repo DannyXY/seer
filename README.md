@@ -22,7 +22,7 @@ Rust Axum backend
 - Provider abstraction
 - Mock/Nansen-ready provider layer
 - Signal generation
-- Claude-compatible reasoning wrapper
+- Claude Messages API reasoning wrapper with deterministic fallback
 - Portfolio identity/SBT metadata
 - Arena predictions with committed points
 - Agent intents
@@ -55,6 +55,16 @@ commit up to 25 USDC weekly into the approved mETH strategy.
 ```
 
 This becomes a policy with allowed assets, allowed protocols, spend caps, expiry, and a policy hash that can be registered on-chain.
+
+## AI Reasoning
+
+Claude is wired as an explanation and classification layer, not as the source of financial facts.
+
+```text
+provider/RPC facts -> backend rules and scoring -> Claude JSON explanation -> backend validation -> response
+```
+
+Set `CLAUDE_API_KEY` to use the live Anthropic Messages API. If the key is absent or Claude fails, Seer returns deterministic fallback copy so signals, intents, and demos keep working.
 
 ## Local Run
 

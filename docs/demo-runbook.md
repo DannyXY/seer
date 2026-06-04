@@ -7,6 +7,15 @@ cp .env.example .env
 cargo run
 ```
 
+For live Claude reasoning, set:
+
+```env
+CLAUDE_API_KEY=sk-ant-...
+CLAUDE_MODEL=claude-sonnet-4-20250514
+```
+
+Without `CLAUDE_API_KEY`, the API still runs with deterministic fallback explanations.
+
 ## Start Worker
 
 ```bash

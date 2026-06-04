@@ -61,7 +61,7 @@ impl Settings {
             database_url: env_opt("DATABASE_URL"),
             redis_url: env_opt("REDIS_URL"),
             claude_api_key: env_opt("CLAUDE_API_KEY"),
-            claude_model: env_or("CLAUDE_MODEL", "claude-3-5-sonnet-latest"),
+            claude_model: env_or("CLAUDE_MODEL", "claude-sonnet-4-20250514"),
             nansen_api_key: env_opt("NANSEN_API_KEY"),
             nansen_base_url: env_opt("NANSEN_BASE_URL"),
             nansen_cli_path: env_or("NANSEN_CLI_PATH", "nansen"),

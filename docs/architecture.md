@@ -12,6 +12,20 @@ MockProvider protects demos.
 Solidity contracts prove points, predictions, identity, intents, and execution policy hashes.
 ```
 
+## AI Layer
+
+Claude is integrated through Anthropic's Messages API when `CLAUDE_API_KEY` is configured. The backend sends structured JSON facts and asks Claude for JSON-only explanations. Responses are parsed and validated before they are returned.
+
+Claude currently supports:
+
+- signal explanations
+- intent parse explanations
+- Arena prediction reasoning copy
+
+Claude does not decide whether a signal is true, whether an intent is allowed, or whether a transaction should execute. Those decisions remain in provider data, backend rules, policy checks, and wallet/smart-account authorization.
+
+If Claude is unavailable, Seer falls back to deterministic explanation text. This keeps the demo reliable without pretending fallback text is live AI reasoning.
+
 ## Provider Strategy
 
 The backend should never hardcode product logic to Nansen-only fields.
