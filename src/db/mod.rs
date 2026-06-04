@@ -131,12 +131,13 @@ pub async fn persist_agent_execution_log(
             reasoning_hash,
             created_at
         )
-        VALUES ($1, $2, NULL, $3, $4, $5, NULL, $6, $7)
+        VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8)
         ON CONFLICT (id) DO NOTHING
         "#,
     )
     .bind(log.id)
     .bind(log.intent_id)
+    .bind(log.policy_id)
     .bind(&log.action_type)
     .bind(serde_json::to_value(&log.proposal)?)
     .bind(&log.execution_status)

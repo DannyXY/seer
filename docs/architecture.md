@@ -156,6 +156,8 @@ PostgreSQL is optional for local demo runs but active when `DATABASE_URL` is con
 - agent execution logs into `agent_execution_logs`
 - intent and policy lifecycle status changes for activation, pause, cancellation, and revocation
 
+Delegated execution logs include the `policy_id` of the session policy that authorized the draft, preserving the audit link between intent, policy, and proposed action.
+
 In-memory state remains the fallback so the MVP can still run when external services are unavailable.
 
 `RUN_MIGRATIONS=true` runs SQLx migrations at startup. Keep it disabled for local mock-only demos unless a reachable Postgres instance is available.

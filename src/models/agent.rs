@@ -117,6 +117,7 @@ pub struct CreateSessionPolicyRequest {
 pub struct AgentExecutionLog {
     pub id: Uuid,
     pub intent_id: Uuid,
+    pub policy_id: Option<Uuid>,
     pub wallet_address: String,
     pub action_type: String,
     pub proposal: ExecutionProposal,

@@ -286,13 +286,21 @@ pub async fn delegated_execute(
             .services
             .execution
             .build_delegated_execution(&intent, &policy, proposal.clone());
-    let execution_log = state.services.agent.record_execution_log(&intent, proposal);
+    let execution_log =
+        state
+            .services
+            .agent
+            .record_execution_log_with_policy(&intent, Some(policy.id), proposal);
     persist_agent_execution_log(state.services.infra.postgres.as_ref(), &execution_log)
         .await
         .map_err(|err| ApiError::Service(err.to_string()))?;
 
     if result.executable {
-        state.services.agent.mark_policy_used(policy.id);
+        if let Some(updated_policy) = state.services.agent.mark_policy_used(policy.id) {
+            persist_agent_execution_policy(state.services.infra.postgres.as_ref(), &updated_policy)
+                .await
+                .map_err(|err| ApiError::Service(err.to_string()))?;
+        }
     }
 
     Ok(Json(json!({

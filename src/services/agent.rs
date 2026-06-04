@@ -270,6 +270,15 @@ impl AgentService {
         intent: &AgentIntent,
         proposal: ExecutionProposal,
     ) -> AgentExecutionLog {
+        self.record_execution_log_with_policy(intent, None, proposal)
+    }
+
+    pub fn record_execution_log_with_policy(
+        &self,
+        intent: &AgentIntent,
+        policy_id: Option<Uuid>,
+        proposal: ExecutionProposal,
+    ) -> AgentExecutionLog {
         let execution_status = if proposal.actionable {
             "proposal_ready_for_user_signature"
         } else {
@@ -278,12 +287,14 @@ impl AgentService {
         .to_string();
         let reasoning_hash = hash_json(&json!({
             "intent_id": intent.id,
+            "policy_id": policy_id,
             "proposal": proposal,
             "execution_status": execution_status,
         }));
         let log = AgentExecutionLog {
             id: Uuid::new_v4(),
             intent_id: intent.id,
+            policy_id,
             wallet_address: intent.wallet_address.clone(),
             action_type: intent.parsed_intent.action.clone(),
             proposal,
@@ -729,6 +740,32 @@ mod tests {
 
         let log = service.record_execution_log(&active, proposal);
         assert_eq!(log.intent_id, active.id);
+        assert!(log.policy_id.is_none());
         assert_eq!(service.execution_logs_for_intent(active.id).len(), 1);
+    }
+
+    #[test]
+    fn records_execution_log_with_policy_id_for_delegated_execution() {
+        let service = AgentService::new();
+        let intent = service.create_intent(CreateIntentRequest {
+            wallet_address: "0x123".to_string(),
+            raw_intent: "When mETH TVL climbs above 40M, buy 25 USDC weekly".to_string(),
+        });
+        let policy = service.create_policy(&intent);
+        let proposal = crate::models::execution::ExecutionProposal {
+            actionable: true,
+            action: intent.parsed_intent.action.clone(),
+            wallet_address: intent.wallet_address.clone(),
+            chain_id: 5003,
+            network: "mantle-testnet".to_string(),
+            conditions: Vec::new(),
+            transaction_draft: None,
+            required_authorization: "session policy".to_string(),
+        };
+
+        let log = service.record_execution_log_with_policy(&intent, Some(policy.id), proposal);
+
+        assert_eq!(log.policy_id, Some(policy.id));
+        assert_eq!(service.execution_logs_for_intent(intent.id).len(), 1);
     }
 }
