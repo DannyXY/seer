@@ -42,6 +42,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/arena/resolve-due", post(arena::resolve_due))
         .route("/api/contracts/readiness", get(contracts::readiness))
         .route(
+            "/api/contracts/execution-readiness",
+            get(contracts::execution_readiness),
+        )
+        .route(
             "/api/contracts/send-raw-transaction",
             post(contracts::send_raw_transaction),
         )

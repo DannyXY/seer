@@ -15,7 +15,8 @@ use crate::{
             AgentIntent, CreateIntentRequest, ExecutionCondition, ExecutionPolicy, ParsedIntent,
         },
         execution::{
-            ConditionEvaluation, DelegatedExecutionResult, ExecutionProposal, TransactionDraft,
+            ConditionEvaluation, DelegatedExecutionResult, ExecutionProposal,
+            ExecutionReadinessResponse, ProtocolExecutionReadiness, TransactionDraft,
             UserOperationDraft,
         },
     },
@@ -98,6 +99,32 @@ impl ExecutionService {
             required_authorization: "user-signed transaction or scoped delegated execution policy"
                 .to_string(),
         })
+    }
+
+    pub fn readiness(&self) -> ExecutionReadinessResponse {
+        let mut configured_token_symbols: Vec<_> =
+            self.action_config.token_addresses.keys().cloned().collect();
+        configured_token_symbols.sort();
+
+        ExecutionReadinessResponse {
+            chain_id: self.chain_id,
+            configured_token_symbols,
+            generic_strategy_address: self.action_config.approved_strategy_address.clone(),
+            generic_deposit_function: self.action_config.strategy_deposit_function.clone(),
+            protocols: known_protocols()
+                .iter()
+                .map(|protocol| {
+                    let strategy = self.action_config.protocol_strategies.get(*protocol);
+                    ProtocolExecutionReadiness {
+                        protocol: (*protocol).to_string(),
+                        strategy_address: strategy.map(|strategy| strategy.address.clone()),
+                        deposit_function: strategy
+                            .map(|strategy| strategy.deposit_function.clone()),
+                        ready_for_strategy_draft: strategy.is_some(),
+                    }
+                })
+                .collect(),
+        }
     }
 
     pub async fn evaluate_stored_intent(
@@ -350,9 +377,9 @@ impl ExecutionService {
     fn build_approval_draft(&self, parsed: &ParsedIntent) -> Option<TransactionDraft> {
         let spend = parsed.spend_amount.as_ref()?;
         let token_address = self.action_config.token_addresses.get(&spend.asset)?;
-        let spender = self.action_config.approved_strategy_address.as_ref()?;
+        let spender = self.strategy_for_intent(parsed)?;
         let token = Address::from_str(token_address).ok()?;
-        let spender_address = Address::from_str(spender).ok()?;
+        let spender_address = Address::from_str(&spender.address).ok()?;
         let amount = self.spend_units(parsed)?;
         let mut data = id("approve(address,uint256)")[..4].to_vec();
         data.extend(encode(&[
@@ -368,7 +395,7 @@ impl ExecutionService {
             chain_id: self.chain_id,
             human_summary: format!(
                 "Approve {} {} for strategy contract {} on Mantle testnet.",
-                spend.amount, spend.asset, spender
+                spend.amount, spend.asset, spender.address
             ),
         })
     }
@@ -435,32 +462,36 @@ fn token_decimals(asset: &str) -> u32 {
     }
 }
 
+fn known_protocols() -> [&'static str; 4] {
+    ["Merchant Moe", "Lendle", "Agni Finance", "mETH Protocol"]
+}
+
 fn protocol_strategies_from_settings(settings: &Settings) -> HashMap<String, ProtocolStrategy> {
     let mut strategies = HashMap::new();
     insert_protocol_strategy(
         &mut strategies,
-        "Merchant Moe",
+        known_protocols()[0],
         settings.merchant_moe_strategy_address.clone(),
         settings.merchant_moe_deposit_function.clone(),
         &settings.strategy_deposit_function,
     );
     insert_protocol_strategy(
         &mut strategies,
-        "Lendle",
+        known_protocols()[1],
         settings.lendle_strategy_address.clone(),
         settings.lendle_deposit_function.clone(),
         &settings.strategy_deposit_function,
     );
     insert_protocol_strategy(
         &mut strategies,
-        "Agni Finance",
+        known_protocols()[2],
         settings.agni_strategy_address.clone(),
         settings.agni_deposit_function.clone(),
         &settings.strategy_deposit_function,
     );
     insert_protocol_strategy(
         &mut strategies,
-        "mETH Protocol",
+        known_protocols()[3],
         settings.meth_strategy_address.clone(),
         settings.meth_deposit_function.clone(),
         &settings.strategy_deposit_function,
@@ -652,6 +683,59 @@ mod tests {
         );
         assert!(draft.data.unwrap().starts_with("0x095ea7b3"));
         assert_eq!(draft.chain_id, 5003);
+    }
+
+    #[tokio::test]
+    async fn approval_draft_uses_named_protocol_destination() {
+        let agent = AgentService::new();
+        let mut settings = Settings::from_env().unwrap();
+        settings.mantle_usdc_address =
+            Some("0x0000000000000000000000000000000000000001".to_string());
+        settings.approved_strategy_address =
+            Some("0x0000000000000000000000000000000000000002".to_string());
+        settings.merchant_moe_strategy_address =
+            Some("0x0000000000000000000000000000000000000003".to_string());
+        let execution = ExecutionService::new(settings);
+        let request = CreateIntentRequest {
+            wallet_address: "0x123".to_string(),
+            raw_intent:
+                "When mETH TVL climbs above 40M, accumulate 25 USDC weekly into Merchant Moe"
+                    .to_string(),
+        };
+        let parsed = agent.parse_intent(&request.raw_intent);
+        let provider: &dyn OnchainDataProvider = &MockProvider;
+        let proposal = execution
+            .evaluate_intent(provider, request, parsed)
+            .await
+            .unwrap();
+        let draft = proposal.transaction_draft.unwrap();
+
+        assert_eq!(draft.kind, "erc20_approve");
+        assert_eq!(
+            draft.human_summary,
+            "Approve 25 USDC for strategy contract 0x0000000000000000000000000000000000000003 on Mantle testnet."
+        );
+    }
+
+    #[test]
+    fn readiness_reports_protocol_configuration() {
+        let mut settings = Settings::from_env().unwrap();
+        settings.mantle_usdc_address =
+            Some("0x0000000000000000000000000000000000000001".to_string());
+        settings.merchant_moe_strategy_address =
+            Some("0x0000000000000000000000000000000000000003".to_string());
+        let execution = ExecutionService::new(settings);
+        let readiness = execution.readiness();
+
+        assert!(readiness
+            .configured_token_symbols
+            .contains(&"USDC".to_string()));
+        assert!(readiness.protocols.iter().any(|protocol| {
+            protocol.protocol == "Merchant Moe" && protocol.ready_for_strategy_draft
+        }));
+        assert!(readiness.protocols.iter().any(|protocol| {
+            protocol.protocol == "Lendle" && !protocol.ready_for_strategy_draft
+        }));
     }
 
     #[tokio::test]

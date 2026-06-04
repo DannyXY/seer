@@ -31,6 +31,10 @@ pub async fn readiness(State(state): State<AppState>) -> Result<Json<Value>, Api
     })))
 }
 
+pub async fn execution_readiness(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    Ok(Json(json!(state.services.execution.readiness())))
+}
+
 pub async fn send_raw_transaction(
     State(state): State<AppState>,
     headers: HeaderMap,

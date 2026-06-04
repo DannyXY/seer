@@ -34,6 +34,23 @@ pub struct TransactionDraft {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProtocolExecutionReadiness {
+    pub protocol: String,
+    pub strategy_address: Option<String>,
+    pub deposit_function: Option<String>,
+    pub ready_for_strategy_draft: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionReadinessResponse {
+    pub chain_id: u64,
+    pub configured_token_symbols: Vec<String>,
+    pub generic_strategy_address: Option<String>,
+    pub generic_deposit_function: String,
+    pub protocols: Vec<ProtocolExecutionReadiness>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserOperationDraft {
     pub sender: String,
     pub call_data: Option<String>,

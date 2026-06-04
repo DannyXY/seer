@@ -219,6 +219,8 @@ If the parsed intent names a configured protocol, Seer routes the strategy call 
 
 Each destination can override the default function signature with its matching `*_DEPOSIT_FUNCTION` variable.
 
+`GET /api/contracts/execution-readiness` exposes which token and protocol destinations are configured, so demos and operators can see whether named protocol execution is genuinely available.
+
 Protocol-specific hardening still remains explicit. Production builders should be added per protocol with ABI, quote, slippage, allowance, and risk checks.
 
 Seer can also call ERC-20 `allowance(owner, spender)` through Mantle RPC. If allowance already covers the intended spend amount, approval is skipped and the configured strategy call can be produced.

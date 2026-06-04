@@ -142,6 +142,14 @@ If allowance covers the intended spend amount, Seer can draft the configured str
 curl http://localhost:10000/api/contracts/readiness
 ```
 
+## Execution Destination Readiness
+
+```bash
+curl http://localhost:10000/api/contracts/execution-readiness
+```
+
+Use this before demoing named protocol execution. A protocol is only ready for strategy drafts when its strategy address is configured.
+
 ## Relay User-Signed Transaction
 
 ```bash
