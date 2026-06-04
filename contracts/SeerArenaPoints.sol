@@ -15,6 +15,7 @@ contract SeerArenaPoints {
     event StarterPointsClaimed(address indexed user, uint256 amount);
     event PointsLocked(address indexed user, uint256 amount);
     event PointsSettled(address indexed user, int256 pointsDelta);
+    event LockedPointsSettled(address indexed user, uint256 lockedAmount, int256 pointsDelta);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "NOT_OWNER");
@@ -51,17 +52,14 @@ contract SeerArenaPoints {
     }
 
     function settlePoints(address user, int256 pointsDelta) external onlyArena {
-        if (pointsDelta >= 0) {
-            uint256 gain = uint256(pointsDelta);
-            availablePoints[user] += lockedPoints[user] + gain;
-        } else {
-            uint256 loss = uint256(-pointsDelta);
-            require(lockedPoints[user] >= loss, "LOSS_EXCEEDS_LOCKED");
-            availablePoints[user] += lockedPoints[user] - loss;
-        }
-
-        lockedPoints[user] = 0;
+        uint256 lockedAmount = lockedPoints[user];
+        _settleLockedPoints(user, lockedAmount, pointsDelta);
         emit PointsSettled(user, pointsDelta);
+    }
+
+    function settleLockedPoints(address user, uint256 lockedAmount, int256 pointsDelta) external onlyArena {
+        _settleLockedPoints(user, lockedAmount, pointsDelta);
+        emit LockedPointsSettled(user, lockedAmount, pointsDelta);
     }
 
     function getTotalPoints(address user) external view returns (uint256) {
@@ -74,5 +72,18 @@ contract SeerArenaPoints {
 
     function getLockedPoints(address user) external view returns (uint256) {
         return lockedPoints[user];
+    }
+
+    function _settleLockedPoints(address user, uint256 lockedAmount, int256 pointsDelta) internal {
+        require(lockedPoints[user] >= lockedAmount, "LOCKED_EXCEEDS_BALANCE");
+
+        lockedPoints[user] -= lockedAmount;
+        if (pointsDelta >= 0) {
+            availablePoints[user] += lockedAmount + uint256(pointsDelta);
+        } else {
+            uint256 loss = uint256(-pointsDelta);
+            require(lockedAmount >= loss, "LOSS_EXCEEDS_LOCKED");
+            availablePoints[user] += lockedAmount - loss;
+        }
     }
 }

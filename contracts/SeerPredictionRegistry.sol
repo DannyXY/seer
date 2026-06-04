@@ -55,6 +55,7 @@ contract SeerPredictionRegistry {
     event PredictionCreated(uint256 indexed predictionId, bytes32 dataKey, uint256 expiryTime);
     event PredictionEntered(uint256 indexed predictionId, address indexed user, Position position, uint256 pointsAmount);
     event PredictionResolved(uint256 indexed predictionId, Outcome outcome, uint256 finalValue);
+    event EntrySettled(uint256 indexed predictionId, address indexed user, int256 pointsDelta);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "NOT_OWNER");
@@ -115,6 +116,7 @@ contract SeerPredictionRegistry {
         require(block.timestamp < prediction.expiryTime, "EXPIRED");
         require(position <= uint8(type(Position).max), "BAD_POSITION");
         require(pointsAmount > 0, "ZERO_POINTS");
+        require(pointsAmount <= uint256(type(int256).max), "POINTS_TOO_LARGE");
         require(entries[predictionId][msg.sender].pointsAmount == 0, "ALREADY_ENTERED");
 
         points.lockPoints(msg.sender, pointsAmount);
@@ -135,5 +137,34 @@ contract SeerPredictionRegistry {
         prediction.finalValue = finalValue;
 
         emit PredictionResolved(predictionId, Outcome(outcome), finalValue);
+    }
+
+    function settleEntry(uint256 predictionId, address user) external {
+        Prediction storage prediction = predictions[predictionId];
+        Entry storage entry = entries[predictionId][user];
+        require(prediction.expiryTime != 0, "UNKNOWN_PREDICTION");
+        require(prediction.status == Status.Resolved, "NOT_RESOLVED");
+        require(entry.pointsAmount > 0, "NO_ENTRY");
+        require(!entry.resolved, "ENTRY_SETTLED");
+
+        int256 pointsDelta = _entryPointsDelta(prediction, entry);
+        entry.resolved = true;
+        points.settleLockedPoints(user, entry.pointsAmount, pointsDelta);
+
+        emit EntrySettled(predictionId, user, pointsDelta);
+    }
+
+    function _entryPointsDelta(Prediction storage prediction, Entry storage entry) internal view returns (int256) {
+        if (prediction.outcome == Outcome.Void) {
+            return 0;
+        }
+
+        bool entryBackedSeer = entry.position == prediction.seerPosition;
+        bool entryCorrect = prediction.outcome == Outcome.SeerCorrect ? entryBackedSeer : !entryBackedSeer;
+
+        if (entryCorrect) {
+            return int256(entry.pointsAmount);
+        }
+        return -int256(entry.pointsAmount);
     }
 }

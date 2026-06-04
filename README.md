@@ -237,6 +237,14 @@ Run:
 forge test
 ```
 
+If Foundry is not installed, compile with npm solc:
+
+```bash
+npx --yes solc@0.8.24 --bin --abi contracts/SeerArenaPoints.sol contracts/SeerPredictionRegistry.sol contracts/SeerIdentitySBT.sol contracts/SeerIntentRegistry.sol -o /tmp/seer-solc-out
+```
+
+Arena entries settle per prediction entry. `SeerPredictionRegistry.settleEntry` uses `SeerArenaPoints.settleLockedPoints` so resolving one entry does not unlock unrelated points from other active predictions.
+
 ## Nansen Integration Path
 
 The provider layer is built to accept a Nansen-backed implementation without changing product services.

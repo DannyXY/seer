@@ -103,6 +103,8 @@ Protected routes must prove the authenticated wallet matches the wallet being ac
 
 `SeerPredictionRegistry` owns prediction lifecycle and locks points through the points contract.
 
+Arena settlement is per entry. `SeerPredictionRegistry.settleEntry(predictionId, user)` settles only that entry's locked points through `SeerArenaPoints.settleLockedPoints`, preserving other active locked points for the same user.
+
 `SeerIdentitySBT` mints non-transferable identity records.
 
 `SeerIntentRegistry` anchors:
