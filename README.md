@@ -20,7 +20,7 @@ Rust Axum backend
 
 - Wallet intelligence
 - Provider abstraction
-- Mock/Nansen-ready provider layer
+- Nansen-primary provider layer with per-method mock fallback
 - Signal generation
 - Claude Messages API reasoning wrapper with deterministic fallback
 - Portfolio identity/SBT metadata

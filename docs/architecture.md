@@ -39,6 +39,8 @@ Providers are represented behind `OnchainDataProvider`:
 - future `DefiLlamaProvider`
 - future `CoinGeckoProvider`
 
+`ProviderRegistry` is the runtime provider facade. If Nansen is configured but a method is unavailable or fails, that method falls back to `MockProvider`. This keeps wallet summaries, signals, identity generation, and intent condition checks available during demo or partial provider outages.
+
 ## Intent Execution
 
 Intent execution is not wallet custody.

@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use thiserror::Error;
+use tracing::warn;
 
 use crate::{config::Settings, models::provider::*};
 
@@ -62,10 +63,82 @@ impl ProviderRegistry {
     }
 
     pub async fn provider(&self) -> &dyn OnchainDataProvider {
-        self.nansen
-            .as_ref()
-            .map(|p| p as &dyn OnchainDataProvider)
-            .unwrap_or(&self.mock)
+        self
+    }
+}
+
+#[async_trait]
+impl OnchainDataProvider for ProviderRegistry {
+    async fn get_wallet_profile(&self, address: &str) -> Result<WalletProfile, DataProviderError> {
+        if let Some(nansen) = &self.nansen {
+            match nansen.get_wallet_profile(address).await {
+                Ok(profile) => return Ok(profile),
+                Err(err) => warn!("Nansen wallet profile failed, using mock fallback: {err}"),
+            }
+        }
+        self.mock.get_wallet_profile(address).await
+    }
+
+    async fn get_wallet_positions(
+        &self,
+        address: &str,
+    ) -> Result<Vec<PortfolioPosition>, DataProviderError> {
+        if let Some(nansen) = &self.nansen {
+            match nansen.get_wallet_positions(address).await {
+                Ok(positions) => return Ok(positions),
+                Err(err) => warn!("Nansen wallet positions failed, using mock fallback: {err}"),
+            }
+        }
+        self.mock.get_wallet_positions(address).await
+    }
+
+    async fn get_wallet_transactions(
+        &self,
+        address: &str,
+    ) -> Result<Vec<WalletTransaction>, DataProviderError> {
+        if let Some(nansen) = &self.nansen {
+            match nansen.get_wallet_transactions(address).await {
+                Ok(transactions) => return Ok(transactions),
+                Err(err) => warn!("Nansen wallet transactions failed, using mock fallback: {err}"),
+            }
+        }
+        self.mock.get_wallet_transactions(address).await
+    }
+
+    async fn get_token_flows(&self, token: &str) -> Result<Vec<TokenFlow>, DataProviderError> {
+        if let Some(nansen) = &self.nansen {
+            match nansen.get_token_flows(token).await {
+                Ok(flows) => return Ok(flows),
+                Err(err) => warn!("Nansen token flows failed, using mock fallback: {err}"),
+            }
+        }
+        self.mock.get_token_flows(token).await
+    }
+
+    async fn get_protocol_metrics(
+        &self,
+        protocol: &str,
+    ) -> Result<ProtocolMetrics, DataProviderError> {
+        if let Some(nansen) = &self.nansen {
+            match nansen.get_protocol_metrics(protocol).await {
+                Ok(metrics) => return Ok(metrics),
+                Err(err) => warn!("Nansen protocol metrics failed, using mock fallback: {err}"),
+            }
+        }
+        self.mock.get_protocol_metrics(protocol).await
+    }
+
+    async fn get_smart_money_movements(
+        &self,
+        protocol: Option<&str>,
+    ) -> Result<Vec<SmartMoneyMovement>, DataProviderError> {
+        if let Some(nansen) = &self.nansen {
+            match nansen.get_smart_money_movements(protocol).await {
+                Ok(movements) => return Ok(movements),
+                Err(err) => warn!("Nansen smart money failed, using mock fallback: {err}"),
+            }
+        }
+        self.mock.get_smart_money_movements(protocol).await
     }
 }
 
@@ -227,5 +300,70 @@ impl OnchainDataProvider for MockProvider {
             confidence: 86,
             captured_at: Utc::now(),
         }])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        config::{AppRole, Settings},
+        services::data_provider::{OnchainDataProvider, ProviderRegistry},
+    };
+
+    fn settings_with_nansen() -> Settings {
+        Settings {
+            app_env: "test".to_string(),
+            app_role: AppRole::Api,
+            port: 10000,
+            version: "test".to_string(),
+            database_url: None,
+            redis_url: None,
+            claude_api_key: None,
+            claude_model: "claude-sonnet-4-20250514".to_string(),
+            nansen_api_key: Some("test-key".to_string()),
+            nansen_base_url: None,
+            nansen_cli_path: "nansen".to_string(),
+            mantle_rpc_url: None,
+            mantle_chain_id: 5003,
+            aa_bundler_url: None,
+            backend_signer_private_key: None,
+            mantle_usdc_address: None,
+            mantle_usdt_address: None,
+            mantle_mnt_address: None,
+            mantle_meth_address: None,
+            approved_strategy_address: None,
+            strategy_deposit_function: "deposit(address,uint256)".to_string(),
+            arena_points_address: None,
+            prediction_registry_address: None,
+            identity_sbt_address: None,
+            intent_registry_address: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn registry_falls_back_when_nansen_wallet_profile_is_unavailable() {
+        let registry = ProviderRegistry::new(settings_with_nansen());
+        let profile = registry
+            .get_wallet_profile("0x1234567890123456789012345678901234567890")
+            .await
+            .unwrap();
+
+        assert_eq!(registry.active_name(), "nansen-or-mock-fallback");
+        assert_eq!(profile.network, "mantle");
+        assert!(profile
+            .protocols_used
+            .contains(&"mETH Protocol".to_string()));
+    }
+
+    #[tokio::test]
+    async fn registry_falls_back_when_nansen_protocol_metrics_are_unavailable() {
+        let registry = ProviderRegistry::new(settings_with_nansen());
+        let metrics = registry
+            .get_protocol_metrics("mETH Protocol")
+            .await
+            .unwrap();
+
+        assert_eq!(metrics.protocol, "mETH Protocol");
+        assert_eq!(metrics.risk_score, 46);
     }
 }
