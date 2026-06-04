@@ -30,6 +30,7 @@ impl AgentService {
         let has_schedule = normalized.contains("daily")
             || normalized.contains("weekly")
             || normalized.contains("recurring")
+            || normalized.contains("recurrent")
             || normalized.contains("every ");
         let has_condition = normalized.contains("when ")
             || normalized.contains("if ")
@@ -415,13 +416,20 @@ fn infer_operator_for_metric(normalized: &str, metric: &str, fallback: &str) -> 
     let window = phrase_window(normalized, metric, 8);
     let has_lower_bound_language = window.contains("above")
         || window.contains("over")
+        || window.contains("at least")
+        || window.contains("minimum")
         || window.contains("greater than")
         || window.contains("climbs")
         || window.contains("rises")
         || window.contains("reaches")
+        || window.contains("crosses")
+        || window.contains("exceeds")
+        || window.contains("hits")
         || window.contains(" to ");
     let has_upper_bound_language = window.contains("below")
         || window.contains("under")
+        || window.contains("at most")
+        || window.contains("maximum")
         || window.contains("less than")
         || window.contains("drops")
         || window.contains("falls");
@@ -590,6 +598,56 @@ mod tests {
             parsed.trigger.conditions[0].value["amount"],
             json!(42_000_000.0)
         );
+    }
+
+    #[test]
+    fn parses_recurrent_intent_wording() {
+        let service = AgentService::new();
+        let parsed = service.parse_intent("Recurrent buy 10 USDC into mETH");
+
+        assert!(matches!(
+            parsed.trigger.mode,
+            IntentExecutionMode::Recurring
+        ));
+        assert_eq!(parsed.spend_amount.as_ref().unwrap().amount, 10.0);
+        assert_eq!(parsed.spend_amount.as_ref().unwrap().asset, "USDC");
+    }
+
+    #[test]
+    fn parses_crosses_and_at_least_tvl_language() {
+        let service = AgentService::new();
+        let parsed =
+            service.parse_intent("If mETH TVL crosses at least 55M, accumulate 20 USDC weekly");
+
+        assert!(matches!(
+            parsed.trigger.mode,
+            IntentExecutionMode::RecurringConditional
+        ));
+        assert_eq!(parsed.trigger.conditions.len(), 1);
+        assert_eq!(parsed.trigger.conditions[0].metric, "tvl_usd");
+        assert_eq!(
+            parsed.trigger.conditions[0].operator,
+            "greater_than_or_equal"
+        );
+        assert_eq!(
+            parsed.trigger.conditions[0].value["amount"],
+            json!(55_000_000.0)
+        );
+    }
+
+    #[test]
+    fn parses_at_most_risk_language() {
+        let service = AgentService::new();
+        let parsed = service.parse_intent("If mETH risk level is at most 45, buy 10 USDC");
+
+        assert!(matches!(
+            parsed.trigger.mode,
+            IntentExecutionMode::Conditional
+        ));
+        assert_eq!(parsed.trigger.conditions.len(), 1);
+        assert_eq!(parsed.trigger.conditions[0].metric, "risk_score");
+        assert_eq!(parsed.trigger.conditions[0].operator, "less_than_or_equal");
+        assert_eq!(parsed.trigger.conditions[0].value["amount"], json!(45.0));
     }
 
     #[test]

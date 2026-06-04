@@ -54,6 +54,8 @@ When mETH TVL climbs above $50M and portfolio risk is below 60,
 commit up to 25 USDC weekly into the approved mETH strategy.
 ```
 
+The parser accepts common trigger variants such as `climbs to`, `reaches`, `crosses`, `exceeds`, `at least`, `below`, `under`, `at most`, `recurring`, and `recurrent`.
+
 This becomes a policy with allowed assets, allowed protocols, spend caps, expiry, and a policy hash that can be registered on-chain.
 
 ## AI Reasoning

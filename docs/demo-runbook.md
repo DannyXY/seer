@@ -80,6 +80,8 @@ conditions include tvl/risk-style checks
 requires_user_signature = true
 ```
 
+Supported trigger phrasing includes `climbs to`, `reaches`, `crosses`, `exceeds`, `at least`, `below`, `under`, `at most`, `recurring`, and `recurrent`.
+
 ## Evaluate Actionable Intent
 
 ```bash
