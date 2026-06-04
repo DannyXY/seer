@@ -9,12 +9,14 @@ use crate::models::agent::{AgentExecutionLog, AgentIntent, IntentExecutionMode, 
 pub struct Infrastructure {
     pub postgres: Option<PgPool>,
     pub redis: Option<RedisClient>,
+    pub migrations_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct InfrastructureStatus {
     pub postgres_configured: bool,
     pub redis_configured: bool,
+    pub migrations_enabled: bool,
 }
 
 impl Infrastructure {
@@ -31,14 +33,30 @@ impl Infrastructure {
             .map(|url| RedisClient::open(url.as_str()))
             .transpose()?;
 
-        Ok(Self { postgres, redis })
+        Ok(Self {
+            postgres,
+            redis,
+            migrations_enabled: settings.run_migrations,
+        })
     }
 
     pub fn status(&self) -> InfrastructureStatus {
         InfrastructureStatus {
             postgres_configured: self.postgres.is_some(),
             redis_configured: self.redis.is_some(),
+            migrations_enabled: self.migrations_enabled,
         }
+    }
+
+    pub async fn run_migrations_if_enabled(&self) -> anyhow::Result<()> {
+        if !self.migrations_enabled {
+            return Ok(());
+        }
+        let Some(pool) = &self.postgres else {
+            anyhow::bail!("RUN_MIGRATIONS=true requires DATABASE_URL");
+        };
+        sqlx::migrate!("./migrations").run(pool).await?;
+        Ok(())
     }
 }
 
@@ -150,9 +168,10 @@ fn execution_mode_label(mode: &IntentExecutionMode) -> &'static str {
 #[cfg(test)]
 mod tests {
     use crate::{
+        config::{AppRole, Settings},
         db::{
             execution_mode_label, intent_status_label, persist_agent_execution_log,
-            persist_agent_intent,
+            persist_agent_intent, Infrastructure,
         },
         models::agent::{CreateIntentRequest, IntentExecutionMode, IntentStatus},
         services::agent::AgentService,
@@ -204,5 +223,60 @@ mod tests {
             execution_mode_label(&IntentExecutionMode::RecurringConditional),
             "RECURRING_CONDITIONAL"
         );
+    }
+
+    #[tokio::test]
+    async fn migrations_noop_when_disabled_without_postgres() {
+        let infra = Infrastructure {
+            postgres: None,
+            redis: None,
+            migrations_enabled: false,
+        };
+
+        infra.run_migrations_if_enabled().await.unwrap();
+        assert!(!infra.status().migrations_enabled);
+    }
+
+    #[test]
+    fn infrastructure_status_reports_migration_flag() {
+        let settings = Settings {
+            app_env: "test".to_string(),
+            app_role: AppRole::Api,
+            port: 10000,
+            version: "test".to_string(),
+            database_url: None,
+            run_migrations: true,
+            redis_url: None,
+            claude_api_key: None,
+            claude_model: "claude-sonnet-4-20250514".to_string(),
+            nansen_api_key: None,
+            nansen_base_url: None,
+            nansen_cli_path: "nansen".to_string(),
+            mantle_rpc_url: None,
+            mantle_chain_id: 5003,
+            aa_bundler_url: None,
+            backend_signer_private_key: None,
+            mantle_usdc_address: None,
+            mantle_usdt_address: None,
+            mantle_mnt_address: None,
+            mantle_meth_address: None,
+            approved_strategy_address: None,
+            strategy_deposit_function: "deposit(address,uint256)".to_string(),
+            merchant_moe_strategy_address: None,
+            merchant_moe_deposit_function: None,
+            lendle_strategy_address: None,
+            lendle_deposit_function: None,
+            agni_strategy_address: None,
+            agni_deposit_function: None,
+            meth_strategy_address: None,
+            meth_deposit_function: None,
+            arena_points_address: None,
+            prediction_registry_address: None,
+            identity_sbt_address: None,
+            intent_registry_address: None,
+        };
+        let infra = Infrastructure::from_settings(&settings).unwrap();
+
+        assert!(infra.status().migrations_enabled);
     }
 }

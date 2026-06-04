@@ -29,6 +29,7 @@ pub struct AppServices {
 impl AppServices {
     pub async fn new(settings: Settings) -> anyhow::Result<Self> {
         let infra = Infrastructure::from_settings(&settings)?;
+        infra.run_migrations_if_enabled().await?;
         let provider = data_provider::ProviderRegistry::new(settings.clone());
         let claude = claude::ClaudeService::new(settings.clone());
         Ok(Self {

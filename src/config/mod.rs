@@ -7,6 +7,7 @@ pub struct Settings {
     pub port: u16,
     pub version: String,
     pub database_url: Option<String>,
+    pub run_migrations: bool,
     pub redis_url: Option<String>,
     pub claude_api_key: Option<String>,
     pub claude_model: String,
@@ -68,6 +69,7 @@ impl Settings {
             port: env_or("PORT", "10000").parse()?,
             version: env_or("SEER_VERSION", env!("CARGO_PKG_VERSION")),
             database_url: env_opt("DATABASE_URL"),
+            run_migrations: env_bool("RUN_MIGRATIONS", false),
             redis_url: env_opt("REDIS_URL"),
             claude_api_key: env_opt("CLAUDE_API_KEY"),
             claude_model: env_or("CLAUDE_MODEL", "claude-sonnet-4-20250514"),
@@ -109,4 +111,16 @@ fn env_or(key: &str, default: &str) -> String {
 
 fn env_opt(key: &str) -> Option<String> {
     env::var(key).ok().filter(|value| !value.trim().is_empty())
+}
+
+fn env_bool(key: &str, default: bool) -> bool {
+    env::var(key)
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(default)
 }

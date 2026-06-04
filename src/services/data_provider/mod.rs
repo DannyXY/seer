@@ -530,6 +530,7 @@ mod tests {
             port: 10000,
             version: "test".to_string(),
             database_url: None,
+            run_migrations: false,
             redis_url: None,
             claude_api_key: None,
             claude_model: "claude-sonnet-4-20250514".to_string(),

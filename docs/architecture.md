@@ -157,6 +157,8 @@ PostgreSQL is optional for local demo runs but active when `DATABASE_URL` is con
 
 In-memory state remains the fallback so the MVP can still run when external services are unavailable.
 
+`RUN_MIGRATIONS=true` runs SQLx migrations at startup. Keep it disabled for local mock-only demos unless a reachable Postgres instance is available.
+
 ## Actionability
 
 Seer should not stop at insight cards.
