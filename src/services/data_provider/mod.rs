@@ -1,5 +1,7 @@
 use async_trait::async_trait;
-use chrono::Utc;
+use std::time::Duration;
+
+use chrono::{DateTime, Utc};
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
 use serde_json::{json, Value};
 use thiserror::Error;
@@ -38,15 +40,20 @@ pub trait OnchainDataProvider: Send + Sync {
 pub struct ProviderRegistry {
     mock: MockProvider,
     nansen: Option<NansenProvider>,
+    defillama: Option<DefiLlamaProvider>,
 }
 
 impl ProviderRegistry {
     pub fn new(settings: Settings) -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
         let nansen = settings
             .nansen_api_key
             .clone()
             .map(|api_key| NansenProvider {
-                client: reqwest::Client::new(),
+                client: client.clone(),
                 api_key,
                 base_url: settings
                     .nansen_base_url
@@ -54,15 +61,25 @@ impl ProviderRegistry {
                     .unwrap_or_else(|| "https://api.nansen.ai/api/v1".to_string()),
                 cli_path: settings.nansen_cli_path.clone(),
             });
+        let defillama = settings.defillama_enabled.then(|| DefiLlamaProvider {
+            client,
+            base_url: settings.defillama_base_url.clone(),
+            yields_base_url: settings.defillama_yields_base_url.clone(),
+        });
         Self {
             mock: MockProvider,
             nansen,
+            defillama,
         }
     }
 
     pub fn active_name(&self) -> &'static str {
-        if self.nansen.is_some() {
+        if self.nansen.is_some() && self.defillama.is_some() {
+            "nansen-defillama-mock-fallback"
+        } else if self.nansen.is_some() {
             "nansen-or-mock-fallback"
+        } else if self.defillama.is_some() {
+            "defillama-or-mock-fallback"
         } else {
             "mock"
         }
@@ -128,7 +145,13 @@ impl OnchainDataProvider for ProviderRegistry {
         if let Some(nansen) = &self.nansen {
             match nansen.get_protocol_metrics(protocol).await {
                 Ok(metrics) => return Ok(metrics),
-                Err(err) => warn!("Nansen protocol metrics failed, using mock fallback: {err}"),
+                Err(err) => warn!("Nansen protocol metrics failed: {err}"),
+            }
+        }
+        if let Some(defillama) = &self.defillama {
+            match defillama.get_protocol_metrics(protocol).await {
+                Ok(metrics) => return Ok(metrics),
+                Err(err) => warn!("DefiLlama protocol metrics failed, using mock fallback: {err}"),
             }
         }
         self.mock.get_protocol_metrics(protocol).await
@@ -209,6 +232,98 @@ impl NansenProvider {
     }
 }
 
+pub struct DefiLlamaProvider {
+    client: reqwest::Client,
+    base_url: String,
+    yields_base_url: String,
+}
+
+impl DefiLlamaProvider {
+    async fn get_json(&self, base_url: &str, path: &str) -> Result<Value, DataProviderError> {
+        let url = format!(
+            "{}/{}",
+            base_url.trim_end_matches('/'),
+            path.trim_start_matches('/')
+        );
+        let response = self
+            .client
+            .get(url)
+            .send()
+            .await
+            .map_err(|err| DataProviderError::Unavailable(err.to_string()))?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(DataProviderError::Unavailable(format!(
+                "DefiLlama HTTP {status}: {body}"
+            )));
+        }
+        response
+            .json::<Value>()
+            .await
+            .map_err(|err| DataProviderError::Unavailable(err.to_string()))
+    }
+}
+
+#[async_trait]
+impl OnchainDataProvider for DefiLlamaProvider {
+    async fn get_wallet_profile(&self, address: &str) -> Result<WalletProfile, DataProviderError> {
+        Err(DataProviderError::Unavailable(format!(
+            "DefiLlama wallet profile not supported for {address}"
+        )))
+    }
+
+    async fn get_wallet_positions(
+        &self,
+        address: &str,
+    ) -> Result<Vec<PortfolioPosition>, DataProviderError> {
+        Err(DataProviderError::Unavailable(format!(
+            "DefiLlama wallet positions not supported for {address}"
+        )))
+    }
+
+    async fn get_wallet_transactions(
+        &self,
+        address: &str,
+    ) -> Result<Vec<WalletTransaction>, DataProviderError> {
+        Err(DataProviderError::Unavailable(format!(
+            "DefiLlama wallet transactions not supported for {address}"
+        )))
+    }
+
+    async fn get_token_flows(&self, token: &str) -> Result<Vec<TokenFlow>, DataProviderError> {
+        Err(DataProviderError::Unavailable(format!(
+            "DefiLlama token flows not supported for {token}"
+        )))
+    }
+
+    async fn get_protocol_metrics(
+        &self,
+        protocol: &str,
+    ) -> Result<ProtocolMetrics, DataProviderError> {
+        let captured_at = Utc::now();
+        let protocols_payload = self.get_json(&self.base_url, "/protocols").await?;
+        let yields_payload = self
+            .get_json(&self.yields_base_url, "/pools")
+            .await
+            .unwrap_or_else(|err| {
+                warn!("DefiLlama yields pools unavailable, continuing without APY: {err}");
+                json!({})
+            });
+        protocol_metrics_from_defillama(protocol, &protocols_payload, &yields_payload, captured_at)
+    }
+
+    async fn get_smart_money_movements(
+        &self,
+        protocol: Option<&str>,
+    ) -> Result<Vec<SmartMoneyMovement>, DataProviderError> {
+        Err(DataProviderError::Unavailable(format!(
+            "DefiLlama smart money not supported for {:?}",
+            protocol
+        )))
+    }
+}
+
 #[async_trait]
 impl OnchainDataProvider for NansenProvider {
     async fn get_wallet_profile(&self, address: &str) -> Result<WalletProfile, DataProviderError> {
@@ -275,6 +390,154 @@ fn parse_defi_holdings_positions(payload: &Value) -> Vec<PortfolioPosition> {
         .into_iter()
         .filter_map(position_from_value)
         .collect()
+}
+
+fn protocol_metrics_from_defillama(
+    protocol: &str,
+    protocols_payload: &Value,
+    yields_payload: &Value,
+    captured_at: DateTime<Utc>,
+) -> Result<ProtocolMetrics, DataProviderError> {
+    let protocol_row = candidate_rows(protocols_payload)
+        .into_iter()
+        .find(|row| defillama_protocol_matches(protocol, row))
+        .ok_or_else(|| {
+            DataProviderError::Unavailable(format!("DefiLlama protocol not found: {protocol}"))
+        })?;
+    let tvl_usd = first_f64(
+        protocol_row,
+        &[&["tvl"], &["chainTvls", "Mantle"], &["chainTvls", "mantle"]],
+    )
+    .ok_or_else(|| {
+        DataProviderError::Unavailable(format!("DefiLlama TVL missing for {protocol}"))
+    })?;
+    let tvl_change_24h_pct = first_f64(
+        protocol_row,
+        &[
+            &["change_1d"],
+            &["change1d"],
+            &["tvlPrev1dChange"],
+            &["change_24h"],
+        ],
+    )
+    .unwrap_or(0.0);
+    let apy = defillama_average_apy(protocol, yields_payload);
+
+    Ok(ProtocolMetrics {
+        protocol: canonical_protocol_name(protocol_row).unwrap_or_else(|| protocol.to_string()),
+        source_provider: "defillama".to_string(),
+        tvl_usd,
+        tvl_change_24h_pct,
+        apy,
+        risk_score: risk_score_from_protocol_metrics(tvl_usd, tvl_change_24h_pct, apy),
+        captured_at,
+    })
+}
+
+fn defillama_average_apy(protocol: &str, payload: &Value) -> Option<f64> {
+    let pools: Vec<f64> = candidate_rows(payload)
+        .into_iter()
+        .filter(|row| defillama_yield_pool_matches(protocol, row))
+        .filter_map(|row| first_f64(row, &[&["apy"], &["apyBase"], &["apyReward"]]))
+        .filter(|apy| apy.is_finite() && *apy >= 0.0)
+        .collect();
+    if pools.is_empty() {
+        None
+    } else {
+        Some(pools.iter().sum::<f64>() / pools.len() as f64)
+    }
+}
+
+fn defillama_protocol_matches(requested: &str, row: &Value) -> bool {
+    let aliases = protocol_aliases(requested);
+    for path in [&["name"][..], &["slug"][..], &["displayName"][..]] {
+        if let Some(value) = first_string(row, &[path]) {
+            let normalized = normalize_protocol_name(&value);
+            if aliases.iter().any(|alias| normalized == *alias) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn defillama_yield_pool_matches(requested: &str, row: &Value) -> bool {
+    let aliases = protocol_aliases(requested);
+    let is_mantle = first_string(row, &[&["chain"]])
+        .map(|chain| normalize_protocol_name(&chain) == "mantle")
+        .unwrap_or(false);
+    if !is_mantle {
+        return false;
+    }
+    for path in [
+        &["project"][..],
+        &["protocol"][..],
+        &["poolMeta"][..],
+        &["url"][..],
+    ] {
+        if let Some(value) = first_string(row, &[path]) {
+            let normalized = normalize_protocol_name(&value);
+            if aliases.iter().any(|alias| normalized.contains(alias)) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn protocol_aliases(protocol: &str) -> Vec<String> {
+    let normalized = normalize_protocol_name(protocol);
+    let mut aliases = vec![normalized.clone()];
+    match normalized.as_str() {
+        "methprotocol" | "meth" => {
+            aliases.extend(["methprotocol", "mantlestakedether", "meth"].map(str::to_string));
+        }
+        "merchantmoe" => {
+            aliases.extend(["merchantmoe", "moe"].map(str::to_string));
+        }
+        "agnifinance" => {
+            aliases.extend(["agnifinance", "agni"].map(str::to_string));
+        }
+        "lendle" => {
+            aliases.push("lendle".to_string());
+        }
+        _ => {}
+    }
+    aliases.sort();
+    aliases.dedup();
+    aliases
+}
+
+fn normalize_protocol_name(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn canonical_protocol_name(row: &Value) -> Option<String> {
+    first_string(row, &[&["name"], &["slug"], &["displayName"]])
+}
+
+fn risk_score_from_protocol_metrics(tvl_usd: f64, tvl_change_24h_pct: f64, apy: Option<f64>) -> u8 {
+    let mut risk: f64 = 45.0;
+    if tvl_usd < 5_000_000.0 {
+        risk += 25.0;
+    } else if tvl_usd < 25_000_000.0 {
+        risk += 12.0;
+    } else if tvl_usd > 100_000_000.0 {
+        risk -= 8.0;
+    }
+    if tvl_change_24h_pct.abs() > 20.0 {
+        risk += 12.0;
+    } else if tvl_change_24h_pct.abs() > 10.0 {
+        risk += 6.0;
+    }
+    if apy.is_some_and(|apy| apy > 50.0) {
+        risk += 10.0;
+    }
+    risk.clamp(15.0, 95.0) as u8
 }
 
 fn candidate_rows(payload: &Value) -> Vec<&Value> {
@@ -519,8 +782,8 @@ mod tests {
     use crate::{
         config::{AppRole, Settings},
         services::data_provider::{
-            parse_defi_holdings_positions, risk_score_from_positions, OnchainDataProvider,
-            ProviderRegistry,
+            parse_defi_holdings_positions, protocol_metrics_from_defillama,
+            risk_score_from_positions, OnchainDataProvider, ProviderRegistry,
         },
     };
 
@@ -538,6 +801,9 @@ mod tests {
             nansen_api_key: Some("test-key".to_string()),
             nansen_base_url: None,
             nansen_cli_path: "nansen".to_string(),
+            defillama_enabled: false,
+            defillama_base_url: "https://api.llama.fi".to_string(),
+            defillama_yields_base_url: "https://yields.llama.fi".to_string(),
             mantle_rpc_url: None,
             mantle_chain_id: 5003,
             aa_bundler_url: None,
@@ -634,5 +900,69 @@ mod tests {
         }));
 
         assert_eq!(risk_score_from_positions(&positions), 50);
+    }
+
+    #[test]
+    fn parses_defillama_protocol_metrics_with_mantle_yield_apy() {
+        let protocols = json!([
+            {
+                "name": "Lendle",
+                "slug": "lendle",
+                "tvl": 42500000.0,
+                "change_1d": 3.5,
+                "chains": ["Mantle"]
+            }
+        ]);
+        let yields = json!({
+            "data": [
+                {
+                    "project": "lendle",
+                    "chain": "Mantle",
+                    "symbol": "USDC",
+                    "tvlUsd": 1200000.0,
+                    "apy": 8.4
+                },
+                {
+                    "project": "lendle",
+                    "chain": "Arbitrum",
+                    "symbol": "USDC",
+                    "tvlUsd": 1200000.0,
+                    "apy": 50.0
+                }
+            ]
+        });
+
+        let metrics =
+            protocol_metrics_from_defillama("Lendle", &protocols, &yields, chrono::Utc::now())
+                .unwrap();
+
+        assert_eq!(metrics.protocol, "Lendle");
+        assert_eq!(metrics.source_provider, "defillama");
+        assert_eq!(metrics.tvl_usd, 42500000.0);
+        assert_eq!(metrics.tvl_change_24h_pct, 3.5);
+        assert_eq!(metrics.apy, Some(8.4));
+    }
+
+    #[test]
+    fn defillama_protocol_alias_matches_meth_protocol() {
+        let protocols = json!([
+            {
+                "name": "Mantle Staked Ether",
+                "slug": "mantle-staked-ether",
+                "tvl": 150000000.0,
+                "change_1d": -1.2
+            }
+        ]);
+        let metrics = protocol_metrics_from_defillama(
+            "mETH Protocol",
+            &protocols,
+            &json!({ "data": [] }),
+            chrono::Utc::now(),
+        )
+        .unwrap();
+
+        assert_eq!(metrics.protocol, "Mantle Staked Ether");
+        assert_eq!(metrics.source_provider, "defillama");
+        assert!(metrics.risk_score < 50);
     }
 }
