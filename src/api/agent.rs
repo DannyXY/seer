@@ -62,14 +62,51 @@ pub async fn evaluate_intent_with_allowance(
 ) -> Result<Json<Value>, ApiError> {
     require_wallet(&state, &headers, &req.wallet_address)?;
     let parsed = state.services.agent.parse_intent(&req.raw_intent);
+    let owner_address = req
+        .owner_address
+        .clone()
+        .unwrap_or_else(|| req.wallet_address.clone());
+    let derived_allowance_request = state
+        .services
+        .execution
+        .allowance_request_for_intent(&parsed, &owner_address);
+    let allowance_request = match derived_allowance_request {
+        Some(derived) => {
+            if let Some(token_address) = &req.token_address {
+                if !token_address.eq_ignore_ascii_case(&derived.token_address) {
+                    return Err(ApiError::BadRequest(
+                        "token_address does not match configured intent asset".to_string(),
+                    ));
+                }
+            }
+            if let Some(spender_address) = &req.spender_address {
+                if !spender_address.eq_ignore_ascii_case(&derived.spender_address) {
+                    return Err(ApiError::BadRequest(
+                        "spender_address does not match configured protocol spender".to_string(),
+                    ));
+                }
+            }
+            derived
+        }
+        None => Erc20AllowanceRequest {
+            token_address: req.token_address.clone().ok_or_else(|| {
+                ApiError::BadRequest(
+                    "token_address is required when the intent asset is not configured".to_string(),
+                )
+            })?,
+            owner_address,
+            spender_address: req.spender_address.clone().ok_or_else(|| {
+                ApiError::BadRequest(
+                    "spender_address is required when the protocol spender is not configured"
+                        .to_string(),
+                )
+            })?,
+        },
+    };
     let allowance = state
         .services
         .contracts
-        .erc20_allowance(Erc20AllowanceRequest {
-            token_address: req.token_address.clone(),
-            owner_address: req.owner_address.clone(),
-            spender_address: req.spender_address.clone(),
-        })
+        .erc20_allowance(allowance_request)
         .await
         .map_err(|err| ApiError::BadRequest(err.to_string()))?;
     let allowance_value = parse_rpc_u256(&allowance.allowance)

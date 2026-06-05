@@ -247,6 +247,8 @@ Protocol-specific hardening still remains explicit. Production builders should b
 
 Seer can also call ERC-20 `allowance(owner, spender)` through Mantle RPC. If allowance already covers the intended spend amount, approval is skipped and the configured strategy call can be produced.
 
+For `evaluate-intent-with-allowance`, Seer derives the allowance token and spender from the parsed intent when the asset and destination protocol are configured. Caller-supplied token or spender values are rejected if they conflict with the configured destination. Manual token/spender values are only needed when the protocol is intentionally left unconfigured.
+
 ### Verified Protocol Adapter Notes
 
 Lendle publishes Mantle LendingPool addresses and follows an Aave-style approval then deposit/supply flow. Seer supports configured Lendle calldata for:

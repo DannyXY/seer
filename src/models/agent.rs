@@ -96,9 +96,12 @@ pub struct CreateIntentRequest {
 pub struct EvaluateIntentWithAllowanceRequest {
     pub wallet_address: String,
     pub raw_intent: String,
-    pub token_address: String,
-    pub owner_address: String,
-    pub spender_address: String,
+    #[serde(default)]
+    pub token_address: Option<String>,
+    #[serde(default)]
+    pub owner_address: Option<String>,
+    #[serde(default)]
+    pub spender_address: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

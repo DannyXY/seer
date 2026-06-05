@@ -113,13 +113,11 @@ curl -X POST http://localhost:10000/api/agent/evaluate-intent-with-allowance \
   -d '{
     "wallet_address": "0x1234567890123456789012345678901234567890",
     "raw_intent": "When mETH TVL climbs above 40M and my risk score is below 60, accumulate 25 USDC weekly into mETH",
-    "token_address": "0xToken",
-    "owner_address": "0xWalletOrSmartAccount",
-    "spender_address": "0xStrategy"
+    "owner_address": "0xWalletOrSmartAccount"
   }'
 ```
 
-This evaluates provider conditions and reads ERC-20 allowance from Mantle RPC in one call. The returned proposal gives the next transaction draft: approval if allowance is low, strategy execution if allowance is sufficient.
+This evaluates provider conditions and reads ERC-20 allowance from Mantle RPC in one call. If the intent asset and protocol destination are configured, Seer derives the token and spender from the parsed intent. If they are not configured, include `token_address` and `spender_address` explicitly. The returned proposal gives the next transaction draft: approval if allowance is low, strategy execution if allowance is sufficient.
 
 ## Check ERC-20 Allowance
 

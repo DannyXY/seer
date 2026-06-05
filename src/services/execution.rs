@@ -15,9 +15,9 @@ use crate::{
             AgentIntent, CreateIntentRequest, ExecutionCondition, ExecutionPolicy, ParsedIntent,
         },
         execution::{
-            ConditionEvaluation, DelegatedExecutionResult, ExecutionProposal,
-            ExecutionReadinessResponse, ProtocolExecutionReadiness, TransactionDraft,
-            UserOperationDraft,
+            ConditionEvaluation, DelegatedExecutionResult, Erc20AllowanceRequest,
+            ExecutionProposal, ExecutionReadinessResponse, ProtocolExecutionReadiness,
+            TransactionDraft, UserOperationDraft,
         },
     },
     services::data_provider::OnchainDataProvider,
@@ -151,6 +151,21 @@ impl ExecutionService {
                 })
                 .collect(),
         }
+    }
+
+    pub fn allowance_request_for_intent(
+        &self,
+        parsed: &ParsedIntent,
+        owner_address: &str,
+    ) -> Option<Erc20AllowanceRequest> {
+        let spend = parsed.spend_amount.as_ref()?;
+        let token_address = self.action_config.token_addresses.get(&spend.asset)?;
+        let strategy = self.strategy_for_intent(parsed)?;
+        Some(Erc20AllowanceRequest {
+            token_address: token_address.clone(),
+            owner_address: owner_address.to_string(),
+            spender_address: strategy.approval_spender_address,
+        })
     }
 
     pub async fn evaluate_stored_intent(
@@ -1061,6 +1076,36 @@ mod tests {
         assert!(draft
             .human_summary
             .contains("for 0x00000000000000000000000000000000000000aa"));
+    }
+
+    #[test]
+    fn allowance_request_for_lendle_intent_uses_configured_token_and_spender() {
+        let agent = AgentService::new();
+        let mut settings = Settings::from_env().unwrap();
+        settings.mantle_usdc_address =
+            Some("0x0000000000000000000000000000000000000001".to_string());
+        settings.lendle_strategy_address =
+            Some("0x0000000000000000000000000000000000000005".to_string());
+        settings.lendle_spender_address =
+            Some("0x0000000000000000000000000000000000000006".to_string());
+        let execution = ExecutionService::new(settings);
+        let parsed = agent.parse_intent("Supply 10 USDC into Lendle now");
+        let request = execution
+            .allowance_request_for_intent(&parsed, "0x00000000000000000000000000000000000000aa")
+            .unwrap();
+
+        assert_eq!(
+            request.token_address,
+            "0x0000000000000000000000000000000000000001"
+        );
+        assert_eq!(
+            request.owner_address,
+            "0x00000000000000000000000000000000000000aa"
+        );
+        assert_eq!(
+            request.spender_address,
+            "0x0000000000000000000000000000000000000006"
+        );
     }
 
     #[tokio::test]
