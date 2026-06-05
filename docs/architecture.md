@@ -48,6 +48,8 @@ Nansen `portfolio/defi-holdings` is wired for wallet positions and profile summa
 - top holders for concentration and governance risk
 - Nansen-native protocol metrics for TVL, APY, and risk conditions
 
+Signals preserve the concrete provider source from their underlying facts. Smart-money signals can report `nansen`, protocol metric signals can report `defillama`, and fallback signals report `mock`.
+
 ## Intent Execution
 
 Intent execution is not wallet custody.

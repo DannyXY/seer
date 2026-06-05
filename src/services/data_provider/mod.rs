@@ -501,6 +501,7 @@ fn smart_money_movement_from_value(value: &Value) -> Option<SmartMoneyMovement> 
         wallet,
         protocol,
         asset,
+        source_provider: "nansen".to_string(),
         direction: "holding".to_string(),
         usd_value,
         confidence,
@@ -867,6 +868,7 @@ impl OnchainDataProvider for MockProvider {
         Ok(vec![TokenFlow {
             token: token.to_string(),
             protocol: Some("mETH Protocol".to_string()),
+            source_provider: "mock".to_string(),
             net_flow_usd: 1_250_000.0,
             wallet_count: 73,
             smart_money_wallet_count: 8,
@@ -897,6 +899,7 @@ impl OnchainDataProvider for MockProvider {
             wallet: "0xsmart000000000000000000000000000000000001".to_string(),
             protocol: protocol.unwrap_or("mETH Protocol").to_string(),
             asset: "mETH".to_string(),
+            source_provider: "mock".to_string(),
             direction: "entered".to_string(),
             usd_value: 284_000.0,
             confidence: 86,
@@ -1054,6 +1057,7 @@ mod tests {
         assert_eq!(movements[0].asset, "MNT");
         assert_eq!(movements[0].wallet, "Top Fund");
         assert_eq!(movements[0].protocol, "mantle");
+        assert_eq!(movements[0].source_provider, "nansen");
         assert_eq!(movements[0].direction, "holding");
         assert!(movements[0].confidence >= 70);
         assert_eq!(movements[1].asset, "mETH");

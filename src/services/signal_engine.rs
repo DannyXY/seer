@@ -37,7 +37,7 @@ impl SignalEngine {
                 related_wallet: Some(movement.wallet.clone()),
                 related_protocol: Some(movement.protocol.clone()),
                 related_asset: Some(movement.asset.clone()),
-                source_provider: "mock-or-nansen".to_string(),
+                source_provider: movement.source_provider.clone(),
                 source_data: json!(movement),
                 created_at: Utc::now(),
             });
@@ -54,7 +54,7 @@ impl SignalEngine {
                     related_wallet: None,
                     related_protocol: Some(metrics.protocol.clone()),
                     related_asset: None,
-                    source_provider: "mock-or-nansen".to_string(),
+                    source_provider: metrics.source_provider.clone(),
                     source_data: json!(metrics),
                     created_at: Utc::now(),
                 });
@@ -73,7 +73,7 @@ impl SignalEngine {
                     related_wallet: None,
                     related_protocol: flow.protocol.clone(),
                     related_asset: Some(flow.token.clone()),
-                    source_provider: "mock-or-nansen".to_string(),
+                    source_provider: flow.source_provider.clone(),
                     source_data: json!(flow),
                     created_at: Utc::now(),
                 });
@@ -81,5 +81,24 @@ impl SignalEngine {
         }
 
         Ok(signals)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::services::{
+        data_provider::{MockProvider, OnchainDataProvider},
+        signal_engine::SignalEngine,
+    };
+
+    #[tokio::test]
+    async fn generated_signals_preserve_provider_sources() {
+        let provider: &dyn OnchainDataProvider = &MockProvider;
+        let signals = SignalEngine::new().generate(provider).await.unwrap();
+
+        assert!(!signals.is_empty());
+        assert!(signals
+            .iter()
+            .all(|signal| signal.source_provider == "mock"));
     }
 }
