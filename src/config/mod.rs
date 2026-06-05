@@ -14,6 +14,7 @@ pub struct Settings {
     pub nansen_api_key: Option<String>,
     pub nansen_base_url: Option<String>,
     pub nansen_cli_path: String,
+    pub nansen_smart_money_chains: Vec<String>,
     pub defillama_enabled: bool,
     pub defillama_base_url: String,
     pub defillama_yields_base_url: String,
@@ -84,6 +85,10 @@ impl Settings {
             nansen_api_key: env_opt("NANSEN_API_KEY"),
             nansen_base_url: env_opt("NANSEN_BASE_URL"),
             nansen_cli_path: env_or("NANSEN_CLI_PATH", "nansen"),
+            nansen_smart_money_chains: env_csv(
+                "NANSEN_SMART_MONEY_CHAINS",
+                &["ethereum", "solana", "base"],
+            ),
             defillama_enabled: env_bool("DEFILLAMA_ENABLED", true),
             defillama_base_url: env_or("DEFILLAMA_BASE_URL", "https://api.llama.fi"),
             defillama_yields_base_url: env_or(
@@ -142,4 +147,19 @@ fn env_bool(key: &str, default: bool) -> bool {
             )
         })
         .unwrap_or(default)
+}
+
+fn env_csv(key: &str, default: &[&str]) -> Vec<String> {
+    env::var(key)
+        .ok()
+        .map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .filter(|values| !values.is_empty())
+        .unwrap_or_else(|| default.iter().map(|value| value.to_string()).collect())
 }

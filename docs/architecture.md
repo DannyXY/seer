@@ -41,10 +41,11 @@ Providers are represented behind `OnchainDataProvider`:
 
 `ProviderRegistry` is the runtime provider facade. If Nansen is configured but a method is unavailable or fails, protocol metrics fall through to `DefiLlamaProvider` before `MockProvider`. Other methods still fall back to `MockProvider`. This keeps wallet summaries, signals, identity generation, and intent condition checks available during demo or partial provider outages.
 
-Nansen `portfolio/defi-holdings` is wired for wallet positions and profile summaries. DeFiLlama protocol TVL and yield pool data are wired for TVL/APY condition checks. The remaining Nansen surfaces should be mapped next:
+Nansen `portfolio/defi-holdings` is wired for wallet positions and profile summaries. Nansen `smart-money/holdings` is wired for Signal Engine smart-money movement inputs. DeFiLlama protocol TVL and yield pool data are wired for TVL/APY condition checks. The remaining Nansen surfaces should be mapped next:
 
-- smart-money holdings for signal generation
 - token holder/flow data for asset movement signals
+- token screener for emerging token discovery
+- top holders for concentration and governance risk
 - Nansen-native protocol metrics for TVL, APY, and risk conditions
 
 ## Intent Execution

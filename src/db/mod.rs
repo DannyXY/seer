@@ -313,6 +313,11 @@ mod tests {
             nansen_api_key: None,
             nansen_base_url: None,
             nansen_cli_path: "nansen".to_string(),
+            nansen_smart_money_chains: vec![
+                "ethereum".to_string(),
+                "solana".to_string(),
+                "base".to_string(),
+            ],
             defillama_enabled: true,
             defillama_base_url: "https://api.llama.fi".to_string(),
             defillama_yields_base_url: "https://yields.llama.fi".to_string(),

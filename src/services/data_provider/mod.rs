@@ -60,6 +60,7 @@ impl ProviderRegistry {
                     .clone()
                     .unwrap_or_else(|| "https://api.nansen.ai/api/v1".to_string()),
                 cli_path: settings.nansen_cli_path.clone(),
+                smart_money_chains: settings.nansen_smart_money_chains.clone(),
             });
         let defillama = settings.defillama_enabled.then(|| DefiLlamaProvider {
             client,
@@ -176,6 +177,7 @@ pub struct NansenProvider {
     api_key: String,
     base_url: String,
     cli_path: String,
+    smart_money_chains: Vec<String>,
 }
 
 impl NansenProvider {
@@ -229,6 +231,28 @@ impl NansenProvider {
             )
             .await?;
         Ok(parse_defi_holdings_positions(&payload))
+    }
+
+    async fn smart_money_holdings(&self) -> Result<Vec<SmartMoneyMovement>, DataProviderError> {
+        let payload = self
+            .post_json(
+                "/smart-money/holdings",
+                json!({
+                    "chains": self.smart_money_chains.clone(),
+                    "pagination": {
+                        "page": 1,
+                        "per_page": 50
+                    },
+                    "order_by": [
+                        {
+                            "field": "value_usd",
+                            "direction": "DESC"
+                        }
+                    ]
+                }),
+            )
+            .await?;
+        Ok(parse_smart_money_holdings(&payload))
     }
 }
 
@@ -378,10 +402,23 @@ impl OnchainDataProvider for NansenProvider {
         &self,
         protocol: Option<&str>,
     ) -> Result<Vec<SmartMoneyMovement>, DataProviderError> {
-        Err(DataProviderError::Unavailable(format!(
-            "Nansen smart money not wired for {:?}",
-            protocol
-        )))
+        let movements = self.smart_money_holdings().await?;
+        if let Some(protocol) = protocol {
+            let filtered: Vec<_> = movements
+                .iter()
+                .filter(|movement| {
+                    normalize_protocol_name(&movement.protocol)
+                        .contains(&normalize_protocol_name(protocol))
+                        || normalize_protocol_name(protocol)
+                            .contains(&normalize_protocol_name(&movement.protocol))
+                })
+                .cloned()
+                .collect();
+            if !filtered.is_empty() {
+                return Ok(filtered);
+            }
+        }
+        Ok(movements)
     }
 }
 
@@ -390,6 +427,99 @@ fn parse_defi_holdings_positions(payload: &Value) -> Vec<PortfolioPosition> {
         .into_iter()
         .filter_map(position_from_value)
         .collect()
+}
+
+fn parse_smart_money_holdings(payload: &Value) -> Vec<SmartMoneyMovement> {
+    candidate_rows(payload)
+        .into_iter()
+        .filter_map(smart_money_movement_from_value)
+        .collect()
+}
+
+fn smart_money_movement_from_value(value: &Value) -> Option<SmartMoneyMovement> {
+    let asset = first_string(
+        value,
+        &[
+            &["token_symbol"],
+            &["symbol"],
+            &["token", "symbol"],
+            &["asset_symbol"],
+            &["asset", "symbol"],
+            &["name"],
+            &["token_name"],
+        ],
+    )?;
+    let wallet = first_string(
+        value,
+        &[
+            &["wallet"],
+            &["wallet_address"],
+            &["address"],
+            &["entity"],
+            &["entity_name"],
+            &["smart_money_type"],
+            &["label"],
+        ],
+    )
+    .unwrap_or_else(|| "smart-money-cohort".to_string());
+    let protocol = first_string(
+        value,
+        &[
+            &["protocol"],
+            &["protocol_name"],
+            &["project"],
+            &["chain"],
+            &["token", "chain"],
+        ],
+    )
+    .unwrap_or_else(|| "Smart Money Holdings".to_string());
+    let usd_value = first_f64(
+        value,
+        &[
+            &["value_usd"],
+            &["usd_value"],
+            &["value"],
+            &["balance_usd"],
+            &["amount_usd"],
+            &["token", "value_usd"],
+        ],
+    )
+    .unwrap_or(0.0);
+    let holder_count = first_f64(
+        value,
+        &[
+            &["smart_money_wallet_count"],
+            &["wallet_count"],
+            &["holders"],
+            &["holder_count"],
+        ],
+    )
+    .unwrap_or(1.0);
+    let confidence = smart_money_confidence(usd_value, holder_count);
+
+    Some(SmartMoneyMovement {
+        wallet,
+        protocol,
+        asset,
+        direction: "holding".to_string(),
+        usd_value,
+        confidence,
+        captured_at: Utc::now(),
+    })
+}
+
+fn smart_money_confidence(usd_value: f64, holder_count: f64) -> u8 {
+    let value_component = if usd_value >= 10_000_000.0 {
+        35.0
+    } else if usd_value >= 1_000_000.0 {
+        25.0
+    } else if usd_value >= 100_000.0 {
+        15.0
+    } else {
+        5.0
+    };
+    let holder_component = (holder_count.max(1.0).ln() * 12.0).clamp(5.0, 35.0);
+    (45.0 + value_component + holder_component).clamp(50.0, 95.0) as u8
 }
 
 fn protocol_metrics_from_defillama(
@@ -782,8 +912,9 @@ mod tests {
     use crate::{
         config::{AppRole, Settings},
         services::data_provider::{
-            parse_defi_holdings_positions, protocol_metrics_from_defillama,
-            risk_score_from_positions, OnchainDataProvider, ProviderRegistry,
+            parse_defi_holdings_positions, parse_smart_money_holdings,
+            protocol_metrics_from_defillama, risk_score_from_positions, OnchainDataProvider,
+            ProviderRegistry,
         },
     };
 
@@ -801,6 +932,11 @@ mod tests {
             nansen_api_key: Some("test-key".to_string()),
             nansen_base_url: None,
             nansen_cli_path: "nansen".to_string(),
+            nansen_smart_money_chains: vec![
+                "ethereum".to_string(),
+                "solana".to_string(),
+                "base".to_string(),
+            ],
             defillama_enabled: false,
             defillama_base_url: "https://api.llama.fi".to_string(),
             defillama_yields_base_url: "https://yields.llama.fi".to_string(),
@@ -888,6 +1024,40 @@ mod tests {
         assert_eq!(positions[0].protocol.as_deref(), Some("Merchant Moe"));
         assert_eq!(positions[1].symbol, "mETH");
         assert_eq!(positions[1].usd_value, 4200.50);
+    }
+
+    #[test]
+    fn parses_nansen_smart_money_holdings_rows() {
+        let payload = json!({
+            "data": [
+                {
+                    "token": {
+                        "symbol": "MNT",
+                        "chain": "mantle"
+                    },
+                    "entity_name": "Top Fund",
+                    "value_usd": 2500000.0,
+                    "smart_money_wallet_count": 12
+                },
+                {
+                    "token_symbol": "mETH",
+                    "chain": "mantle",
+                    "wallet_count": 8,
+                    "balance_usd": "750000"
+                }
+            ]
+        });
+
+        let movements = parse_smart_money_holdings(&payload);
+
+        assert_eq!(movements.len(), 2);
+        assert_eq!(movements[0].asset, "MNT");
+        assert_eq!(movements[0].wallet, "Top Fund");
+        assert_eq!(movements[0].protocol, "mantle");
+        assert_eq!(movements[0].direction, "holding");
+        assert!(movements[0].confidence >= 70);
+        assert_eq!(movements[1].asset, "mETH");
+        assert_eq!(movements[1].usd_value, 750000.0);
     }
 
     #[test]

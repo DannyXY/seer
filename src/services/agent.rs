@@ -279,7 +279,9 @@ impl AgentService {
         policy_id: Option<Uuid>,
         proposal: ExecutionProposal,
     ) -> AgentExecutionLog {
-        let execution_status = if proposal.actionable {
+        let execution_status = if proposal.actionable && policy_id.is_some() {
+            "delegated_proposal_ready"
+        } else if proposal.actionable {
             "proposal_ready_for_user_signature"
         } else {
             "conditions_not_satisfied"
@@ -768,6 +770,7 @@ mod tests {
         let log = service.record_execution_log_with_policy(&intent, Some(policy.id), proposal);
 
         assert_eq!(log.policy_id, Some(policy.id));
+        assert_eq!(log.execution_status, "delegated_proposal_ready");
         assert_eq!(service.execution_logs_for_intent(intent.id).len(), 1);
     }
 }

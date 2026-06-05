@@ -1,7 +1,10 @@
 use tokio::time::{interval, MissedTickBehavior};
 use tracing::info;
 
-use crate::AppState;
+use crate::{
+    db::{persist_agent_execution_log, persist_agent_execution_policy},
+    AppState,
+};
 
 pub fn spawn_internal_jobs(state: AppState) {
     tokio::spawn(async move {
@@ -44,6 +47,7 @@ async fn run_fast_jobs(state: &AppState) {
     let active_intents = state.services.agent.active_executable_intents();
     let mut evaluated_intents = 0usize;
     let mut actionable_intents = 0usize;
+    let mut delegated_ready_intents = 0usize;
 
     for intent in active_intents {
         match state
@@ -56,7 +60,77 @@ async fn run_fast_jobs(state: &AppState) {
                 if proposal.actionable {
                     actionable_intents += 1;
                 }
-                state.services.agent.record_execution_log(&intent, proposal);
+                if let Some(policy) = state
+                    .services
+                    .agent
+                    .active_session_policy_for_intent(intent.id)
+                {
+                    let result = state.services.execution.build_delegated_execution(
+                        &intent,
+                        &policy,
+                        proposal.clone(),
+                    );
+                    let execution_log = state.services.agent.record_execution_log_with_policy(
+                        &intent,
+                        Some(policy.id),
+                        proposal,
+                    );
+                    if let Err(err) = persist_agent_execution_log(
+                        state.services.infra.postgres.as_ref(),
+                        &execution_log,
+                    )
+                    .await
+                    {
+                        tracing::warn!(
+                            intent_id = %intent.id,
+                            policy_id = %policy.id,
+                            error = %err,
+                            "failed to persist worker delegated execution log"
+                        );
+                    }
+                    if result.executable {
+                        delegated_ready_intents += 1;
+                        if let Some(updated_policy) =
+                            state.services.agent.mark_policy_used(policy.id)
+                        {
+                            if let Err(err) = persist_agent_execution_policy(
+                                state.services.infra.postgres.as_ref(),
+                                &updated_policy,
+                            )
+                            .await
+                            {
+                                tracing::warn!(
+                                    intent_id = %intent.id,
+                                    policy_id = %policy.id,
+                                    error = %err,
+                                    "failed to persist worker policy usage"
+                                );
+                            }
+                        }
+                    }
+                    tracing::info!(
+                        intent_id = %intent.id,
+                        policy_id = %policy.id,
+                        executable = result.executable,
+                        status = result.execution_status,
+                        "worker evaluated delegated execution"
+                    );
+                } else {
+                    let execution_log =
+                        state.services.agent.record_execution_log(&intent, proposal);
+                    if let Err(err) = persist_agent_execution_log(
+                        state.services.infra.postgres.as_ref(),
+                        &execution_log,
+                    )
+                    .await
+                    {
+                        tracing::warn!(
+                            intent_id = %intent.id,
+                            error = %err,
+                            "failed to persist worker execution log"
+                        );
+                    }
+                }
                 evaluated_intents += 1;
             }
             Err(err) => {
@@ -75,6 +149,7 @@ async fn run_fast_jobs(state: &AppState) {
         jobs = "signals,condition_triggers",
         evaluated_intents,
         actionable_intents,
+        delegated_ready_intents,
         "job tick"
     );
 }
@@ -101,4 +176,112 @@ async fn run_cohort_jobs(state: &AppState) {
         jobs = "wallet_cohort_benchmarks",
         "job tick"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use crate::{
+        config::{AppRole, Settings},
+        models::agent::{CreateIntentRequest, CreateSessionPolicyRequest, IntentStatus},
+        services::AppServices,
+        AppState,
+    };
+
+    use super::run_fast_jobs;
+
+    fn test_settings() -> Settings {
+        Settings {
+            app_env: "test".to_string(),
+            app_role: AppRole::Api,
+            port: 10000,
+            version: "test".to_string(),
+            database_url: None,
+            run_migrations: false,
+            redis_url: None,
+            claude_api_key: None,
+            claude_model: "claude-sonnet-4-20250514".to_string(),
+            nansen_api_key: None,
+            nansen_base_url: None,
+            nansen_cli_path: "nansen".to_string(),
+            nansen_smart_money_chains: vec![
+                "ethereum".to_string(),
+                "solana".to_string(),
+                "base".to_string(),
+            ],
+            defillama_enabled: false,
+            defillama_base_url: "https://api.llama.fi".to_string(),
+            defillama_yields_base_url: "https://yields.llama.fi".to_string(),
+            mantle_rpc_url: None,
+            mantle_chain_id: 5003,
+            aa_bundler_url: None,
+            backend_signer_private_key: None,
+            mantle_usdc_address: Some("0x0000000000000000000000000000000000000001".to_string()),
+            mantle_usdt_address: None,
+            mantle_mnt_address: None,
+            mantle_meth_address: None,
+            approved_strategy_address: None,
+            approved_strategy_spender_address: None,
+            strategy_deposit_function: "deposit(address,uint256)".to_string(),
+            merchant_moe_strategy_address: None,
+            merchant_moe_spender_address: None,
+            merchant_moe_deposit_function: None,
+            lendle_strategy_address: None,
+            lendle_spender_address: None,
+            lendle_deposit_function: None,
+            agni_strategy_address: None,
+            agni_spender_address: None,
+            agni_deposit_function: None,
+            meth_strategy_address: Some("0x0000000000000000000000000000000000000002".to_string()),
+            meth_spender_address: None,
+            meth_deposit_function: None,
+            arena_points_address: None,
+            prediction_registry_address: None,
+            identity_sbt_address: None,
+            intent_registry_address: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn fast_job_uses_active_session_policy_for_actionable_intent() {
+        let settings = test_settings();
+        let services = Arc::new(AppServices::new(settings.clone()).await.unwrap());
+        let state = AppState { settings, services };
+        let intent = state.services.agent.create_intent(CreateIntentRequest {
+            wallet_address: "0x00000000000000000000000000000000000000aa".to_string(),
+            raw_intent: "When mETH TVL climbs above 40M, accumulate 25 USDC weekly into mETH"
+                .to_string(),
+        });
+        let active_intent = state
+            .services
+            .agent
+            .update_status(intent.id, IntentStatus::Active)
+            .unwrap();
+        let policy = state.services.agent.create_session_policy(
+            &active_intent,
+            CreateSessionPolicyRequest {
+                smart_account_address: "0x00000000000000000000000000000000000000bb".to_string(),
+                session_key_address: "0x00000000000000000000000000000000000000cc".to_string(),
+                allowed_assets: vec!["mETH".to_string(), "USDC".to_string()],
+                allowed_protocols: vec!["mETH Protocol".to_string()],
+                allowed_contracts: vec!["0x0000000000000000000000000000000000000001".to_string()],
+                max_spend_usd: Some(100.0),
+                max_transaction_count: Some(2),
+                expires_in_days: Some(7),
+            },
+        );
+
+        run_fast_jobs(&state).await;
+
+        let updated_policy = state.services.agent.get_policy(policy.id).unwrap();
+        let logs = state
+            .services
+            .agent
+            .execution_logs_for_intent(active_intent.id);
+        assert_eq!(updated_policy.transactions_used, 1);
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].policy_id, Some(policy.id));
+        assert_eq!(logs[0].execution_status, "delegated_proposal_ready");
+    }
 }
