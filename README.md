@@ -174,14 +174,15 @@ MANTLE_USDT_ADDRESS=
 MANTLE_MNT_ADDRESS=
 MANTLE_METH_ADDRESS=
 SEER_APPROVED_STRATEGY_ADDRESS=
+SEER_APPROVED_STRATEGY_SPENDER_ADDRESS=
 SEER_STRATEGY_DEPOSIT_FUNCTION=deposit(address,uint256)
 ```
 
-For example, `accumulate 25 USDC` can produce an `erc20_approve` draft with `to=<USDC token>` and `data=approve(strategy, 25 USDC units)`.
+For example, `accumulate 25 USDC` can produce an `erc20_approve` draft with `to=<USDC token>` and `data=approve(spender, 25 USDC units)`. If `SEER_APPROVED_STRATEGY_SPENDER_ADDRESS` is not set, the strategy address is used as the spender.
 
 `POST /api/contracts/erc20-allowance` checks existing token allowance through Mantle RPC. When allowance is already sufficient, Seer can skip the approval transaction and build a configured strategy call such as `deposit(address,uint256)` with `to=<strategy>` and `data=deposit(token, amount)`.
 
-`GET /api/contracts/execution-readiness` reports configured token addresses and named protocol destinations, including Merchant Moe, Lendle, Agni Finance, and mETH Protocol.
+`GET /api/contracts/execution-readiness` reports configured token addresses and named protocol destinations, including Merchant Moe, Lendle, Agni Finance, and mETH Protocol. Readiness includes both the execution target and approval spender for each protocol.
 
 ## Recurring Automation
 

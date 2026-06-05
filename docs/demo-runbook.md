@@ -102,7 +102,7 @@ conditions include observed provider values
 transaction_draft describes the user-signed Mantle testnet action
 ```
 
-Set `MANTLE_USDC_ADDRESS` and `SEER_APPROVED_STRATEGY_ADDRESS` to receive a concrete `erc20_approve` transaction draft for USDC accumulation intents. Set `SEER_STRATEGY_DEPOSIT_FUNCTION` to the selected protocol's ABI signature, defaulting to `deposit(address,uint256)`, so Seer can draft the next strategy call after allowance is sufficient.
+Set `MANTLE_USDC_ADDRESS` and `SEER_APPROVED_STRATEGY_ADDRESS` to receive a concrete `erc20_approve` transaction draft for USDC accumulation intents. Set `SEER_APPROVED_STRATEGY_SPENDER_ADDRESS` when the allowance spender differs from the execution target. Set `SEER_STRATEGY_DEPOSIT_FUNCTION` to the selected protocol's ABI signature, defaulting to `deposit(address,uint256)`, so Seer can draft the next strategy call after allowance is sufficient.
 
 ## Evaluate With Live Allowance
 
@@ -148,9 +148,19 @@ curl http://localhost:10000/api/contracts/readiness
 curl http://localhost:10000/api/contracts/execution-readiness
 ```
 
-Use this before demoing named protocol execution. A protocol is only ready for strategy drafts when its strategy address is configured.
+Use this before demoing named protocol execution. A protocol is only ready for strategy drafts when its strategy address is configured. The readiness response includes both `strategy_address` and `approval_spender_address`, because some Mantle DeFi routes approve a router/spender but execute through a different target.
 
 If the intent names Merchant Moe, Lendle, or Agni Finance and that destination is not configured, Seer returns a non-runnable recommendation instead of falling back to a generic strategy address.
+
+For Lendle-style supply actions, configure the LendingPool as the destination and use the Aave-style deposit signature:
+
+```env
+SEER_LENDLE_STRATEGY_ADDRESS=<Lendle LendingPool>
+SEER_LENDLE_SPENDER_ADDRESS=<Lendle LendingPool>
+SEER_LENDLE_DEPOSIT_FUNCTION=deposit(address,uint256,address,uint16)
+```
+
+Seer also supports `supply(address,uint256,address,uint16)` for Aave-v3-style adapters. Merchant Moe should stay configurable-only until the exact swap or Liquidity Book route, router ABI, quote source, and slippage constraints are verified.
 
 ## Relay User-Signed Transaction
 

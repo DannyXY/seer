@@ -37,7 +37,9 @@ pub struct TransactionDraft {
 pub struct ProtocolExecutionReadiness {
     pub protocol: String,
     pub strategy_address: Option<String>,
+    pub approval_spender_address: Option<String>,
     pub deposit_function: Option<String>,
+    pub adapter_kind: String,
     pub ready_for_strategy_draft: bool,
 }
 
@@ -46,6 +48,7 @@ pub struct ExecutionReadinessResponse {
     pub chain_id: u64,
     pub configured_token_symbols: Vec<String>,
     pub generic_strategy_address: Option<String>,
+    pub generic_approval_spender_address: Option<String>,
     pub generic_deposit_function: String,
     pub protocols: Vec<ProtocolExecutionReadiness>,
 }

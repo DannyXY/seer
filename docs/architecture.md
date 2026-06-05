@@ -209,7 +209,7 @@ Seer includes concrete transaction builders for ERC-20 approvals and a configura
 
 ```text
 to = MANTLE_USDC_ADDRESS
-data = approve(SEER_APPROVED_STRATEGY_ADDRESS, 25 USDC units)
+data = approve(SEER_APPROVED_STRATEGY_SPENDER_ADDRESS || SEER_APPROVED_STRATEGY_ADDRESS, 25 USDC units)
 ```
 
 After allowance is sufficient, Seer can draft the next strategy call:
@@ -230,6 +230,15 @@ If the parsed intent names a configured protocol, Seer routes the strategy call 
 
 Each destination can override the default function signature with its matching `*_DEPOSIT_FUNCTION` variable.
 
+Each destination can also set a distinct ERC-20 approval spender:
+
+- `SEER_MERCHANT_MOE_SPENDER_ADDRESS`
+- `SEER_LENDLE_SPENDER_ADDRESS`
+- `SEER_AGNI_SPENDER_ADDRESS`
+- `SEER_METH_SPENDER_ADDRESS`
+
+If a spender override is omitted, Seer approves the destination strategy address. This matters because many DeFi actions approve a router, vault, or pool contract that is not always the same address as the final execution target.
+
 `GET /api/contracts/execution-readiness` exposes which token and protocol destinations are configured, so demos and operators can see whether named protocol execution is genuinely available.
 
 If an intent explicitly names Merchant Moe, Lendle, or Agni Finance, Seer requires that protocol's destination configuration. It does not silently route those intents to the generic strategy address. Asset-only mETH intents may still use the generic strategy unless `SEER_METH_STRATEGY_ADDRESS` is configured.
@@ -237,3 +246,24 @@ If an intent explicitly names Merchant Moe, Lendle, or Agni Finance, Seer requir
 Protocol-specific hardening still remains explicit. Production builders should be added per protocol with ABI, quote, slippage, allowance, and risk checks.
 
 Seer can also call ERC-20 `allowance(owner, spender)` through Mantle RPC. If allowance already covers the intended spend amount, approval is skipped and the configured strategy call can be produced.
+
+### Verified Protocol Adapter Notes
+
+Lendle publishes Mantle LendingPool addresses and follows an Aave-style approval then deposit/supply flow. Seer supports configured Lendle calldata for:
+
+```text
+deposit(address,uint256,address,uint16)
+supply(address,uint256,address,uint16)
+```
+
+The `onBehalfOf` argument is the intent wallet or smart account, and `referralCode` is encoded as `0`.
+
+Merchant Moe publishes Mantle router addresses, including `MoeRouter`, `LFJ Aggregator Router`, `LB Router`, and `LB Quoter`, but Seer should not hardcode Merchant Moe execution until the specific action path is selected and verified:
+
+- swap vs Liquidity Book liquidity add
+- router ABI and function signature
+- pair/path/bin parameters
+- quote source and slippage bound
+- exact spender address
+
+Until then, Merchant Moe remains a named configurable destination rather than a hardcoded adapter.
