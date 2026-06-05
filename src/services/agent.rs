@@ -734,6 +734,7 @@ mod tests {
             chain_id: 5003,
             network: "mantle-testnet".to_string(),
             conditions: Vec::new(),
+            allowance_check: None,
             transaction_draft: None,
             required_authorization: "user-signed transaction".to_string(),
         };
@@ -759,6 +760,7 @@ mod tests {
             chain_id: 5003,
             network: "mantle-testnet".to_string(),
             conditions: Vec::new(),
+            allowance_check: None,
             transaction_draft: None,
             required_authorization: "session policy".to_string(),
         };

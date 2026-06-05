@@ -105,6 +105,7 @@ impl ExecutionService {
                     human_summary: "No contract call is generated yet; Seer can recommend the action and anchor the intent.".to_string(),
                 })
         });
+        let allowance_check = self.allowance_request_for_intent(&parsed, &request.wallet_address);
 
         Ok(ExecutionProposal {
             actionable,
@@ -113,6 +114,7 @@ impl ExecutionService {
             chain_id: self.chain_id,
             network: "mantle-testnet".to_string(),
             conditions: evaluations,
+            allowance_check,
             transaction_draft,
             required_authorization: "user-signed transaction or scoped delegated execution policy"
                 .to_string(),
@@ -781,6 +783,15 @@ mod tests {
             .unwrap();
         let draft = proposal.transaction_draft.unwrap();
 
+        let allowance_check = proposal.allowance_check.unwrap();
+        assert_eq!(
+            allowance_check.token_address,
+            "0x0000000000000000000000000000000000000001"
+        );
+        assert_eq!(
+            allowance_check.spender_address,
+            "0x0000000000000000000000000000000000000002"
+        );
         assert_eq!(draft.kind, "erc20_approve");
         assert_eq!(
             draft.to,
@@ -992,6 +1003,11 @@ mod tests {
             .unwrap();
         let draft = proposal.transaction_draft.unwrap();
 
+        let allowance_check = proposal.allowance_check.unwrap();
+        assert_eq!(
+            allowance_check.spender_address,
+            "0x0000000000000000000000000000000000000002"
+        );
         assert_eq!(draft.kind, "strategy_deposit");
         assert_eq!(
             draft.to,
@@ -1031,6 +1047,11 @@ mod tests {
             .unwrap();
         let draft = proposal.transaction_draft.unwrap();
 
+        let allowance_check = proposal.allowance_check.unwrap();
+        assert_eq!(
+            allowance_check.spender_address,
+            "0x0000000000000000000000000000000000000003"
+        );
         assert_eq!(draft.kind, "strategy_deposit");
         assert_eq!(
             draft.to,

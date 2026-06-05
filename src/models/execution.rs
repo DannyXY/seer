@@ -19,6 +19,7 @@ pub struct ExecutionProposal {
     pub chain_id: u64,
     pub network: String,
     pub conditions: Vec<ConditionEvaluation>,
+    pub allowance_check: Option<Erc20AllowanceRequest>,
     pub transaction_draft: Option<TransactionDraft>,
     pub required_authorization: String,
 }
