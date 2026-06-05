@@ -98,7 +98,7 @@ Expected shape:
 
 ```text
 actionable = true
-conditions include observed provider values
+conditions include observed provider values, source provider, and capture time
 allowance_check identifies the token/spender Seer expects for approval
 transaction_draft describes the user-signed Mantle testnet action
 ```

@@ -349,17 +349,25 @@ impl ExecutionService {
         provider: &dyn OnchainDataProvider,
         condition: &ExecutionCondition,
     ) -> anyhow::Result<ConditionEvaluation> {
+        let mut source_provider = None;
+        let mut source_captured_at = None;
         let observed = match condition.metric.as_str() {
             "tvl_usd" => {
                 let metrics = provider.get_protocol_metrics(&condition.subject).await?;
+                source_provider = Some(metrics.source_provider);
+                source_captured_at = Some(metrics.captured_at);
                 Some(json!(metrics.tvl_usd))
             }
             "risk_score" => {
                 let metrics = provider.get_protocol_metrics(&condition.subject).await?;
+                source_provider = Some(metrics.source_provider);
+                source_captured_at = Some(metrics.captured_at);
                 Some(json!(metrics.risk_score))
             }
             "apy" => {
                 let metrics = provider.get_protocol_metrics(&condition.subject).await?;
+                source_provider = Some(metrics.source_provider);
+                source_captured_at = Some(metrics.captured_at);
                 metrics.apy.map(|apy| json!(apy))
             }
             _ => None,
@@ -379,6 +387,8 @@ impl ExecutionService {
         Ok(ConditionEvaluation {
             condition: condition.clone(),
             observed_value: observed,
+            source_provider,
+            source_captured_at,
             passed,
             reason: if passed {
                 "condition satisfied by provider facts".to_string()
@@ -687,6 +697,10 @@ mod tests {
 
         assert!(proposal.actionable);
         assert_eq!(proposal.conditions.len(), 2);
+        assert!(proposal.conditions.iter().all(|evaluation| {
+            evaluation.source_provider.as_deref() == Some("mock")
+                && evaluation.source_captured_at.is_some()
+        }));
         assert!(proposal.transaction_draft.is_some());
     }
 

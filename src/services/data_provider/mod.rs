@@ -487,6 +487,7 @@ impl OnchainDataProvider for MockProvider {
     ) -> Result<ProtocolMetrics, DataProviderError> {
         Ok(ProtocolMetrics {
             protocol: protocol.to_string(),
+            source_provider: "mock".to_string(),
             tvl_usd: 42_000_000.0,
             tvl_change_24h_pct: 9.4,
             apy: Some(12.8),

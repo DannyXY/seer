@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -7,6 +8,8 @@ use crate::models::agent::ExecutionCondition;
 pub struct ConditionEvaluation {
     pub condition: ExecutionCondition,
     pub observed_value: Option<Value>,
+    pub source_provider: Option<String>,
+    pub source_captured_at: Option<DateTime<Utc>>,
     pub passed: bool,
     pub reason: String,
 }

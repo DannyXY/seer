@@ -44,6 +44,7 @@ pub struct TokenFlow {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProtocolMetrics {
     pub protocol: String,
+    pub source_provider: String,
     pub tvl_usd: f64,
     pub tvl_change_24h_pct: f64,
     pub apy: Option<f64>,

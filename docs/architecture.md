@@ -257,6 +257,16 @@ allowance_check.owner_address
 allowance_check.spender_address
 ```
 
+Condition evaluations include provider provenance:
+
+```text
+condition.observed_value
+condition.source_provider
+condition.source_captured_at
+```
+
+This keeps triggered actions explainable: Seer can show which TVL, APY, or risk fact caused an instant, recurring, conditional, or recurring-conditional intent to become actionable.
+
 ### Verified Protocol Adapter Notes
 
 Lendle publishes Mantle LendingPool addresses and follows an Aave-style approval then deposit/supply flow. Seer supports configured Lendle calldata for:
