@@ -14,10 +14,12 @@ The backend currently supports:
 - condition evaluation for TVL, APY, and risk score triggers
 - condition provenance through `source_provider` and `source_captured_at`
 - execution proposals with ERC-20 allowance metadata
+- Mantle RPC transaction simulation before surfacing concrete allowance-aware drafts
 - user-signed raw transaction relay through Mantle RPC
 - ERC-4337 user-operation relay boundaries
 - session-policy based delegated execution drafts
 - worker evaluation of active executable intents
+- Postgres persistence for generated signal snapshots and fast worker job summaries
 - Arena points and prediction lifecycle contracts
 - Identity SBT and intent registry contracts
 
@@ -27,6 +29,9 @@ Implemented provider surfaces:
 
 - Nansen `portfolio/defi-holdings` for wallet positions and wallet profile summaries
 - Nansen `smart-money/holdings` for smart-money signal inputs
+- Nansen `token-screener` for token-level smart-money signal inputs
+- Nansen Token God Mode `tgm/flows` for token flow signals
+- Nansen Token God Mode `tgm/holders` as token holder fallback summaries
 - DeFiLlama protocol TVL/APY fallback for protocol metrics
 - MockProvider fallback for demo safety
 
@@ -44,9 +49,6 @@ Nansen -> MockProvider
 
 Still left:
 
-- Nansen token holder endpoint mapping
-- Nansen token screener endpoint mapping
-- Nansen token flow endpoint mapping
 - Nansen-native protocol metrics once the exact response schema is confirmed
 - optional Allium provider integration if richer query workflows are needed
 
@@ -106,7 +108,6 @@ Still left before claiming full live protocol support:
   - classic AMM add liquidity
 - verify Merchant Moe router ABI, route/path/bin parameters, quoter, and spender
 - add withdrawal/reduce-position builders
-- add transaction simulation or dry-run checks before surfacing executable drafts
 
 Do not hardcode Merchant Moe execution until the exact route semantics are verified.
 
@@ -129,13 +130,24 @@ bundler relays user operation
 
 What is still left:
 
-- pick the smart-account provider stack
-- wire the provider SDK that builds valid user operations
 - validate session keys against the smart account on-chain
 - optionally integrate paymaster support
-- submit complete user operations through the configured bundler
+- validate one complete Safe ERC-4337 user operation through the configured bundler
 
-Current backend relay boundary exists, but provider-specific smart-account signing/building is not complete.
+Selected stack:
+
+```text
+AA_PROVIDER_STACK=safe-4337-relay-kit
+AA_ENTRY_POINT_ADDRESS=<Safe4337 EntryPoint>
+AA_BUNDLER_URL=<ERC-4337 bundler>
+AA_PAYMASTER_URL=<optional paymaster>
+```
+
+Current backend relay boundary validates session-policy addresses and provider-built user-operation shape. Provider-specific Safe session-key signing/building remains outside the Rust backend and must produce a complete signed user operation before Seer relays it.
+
+`GET /api/contracts/readiness` exposes `live_validation.safe_user_operation` and `live_validation.lendle_supply` to show missing env/config before attempting live Safe or Lendle validation.
+
+Use `scripts/live-validation-smoke.sh` against a running API to print readiness and optionally enforce `REQUIRE_SAFE_READY=1` or `REQUIRE_LENDLE_READY=1`.
 
 ## API And Worker Runtime
 
@@ -146,6 +158,7 @@ Recommended production layout:
 ```text
 Render Web Service:
   APP_ROLE=api
+  RUN_INTERNAL_JOBS=false
   runs Axum API
 
 Render Background Worker:
@@ -170,18 +183,11 @@ cargo run
 APP_ROLE=worker cargo run
 ```
 
-Important note: the API role currently starts an internal MVP scheduler. For production with a separate worker, disable the internal scheduler or guard it with an env var such as:
+The API role starts an internal MVP scheduler by default for local convenience. Production API services should disable it when a separate worker is running:
 
 ```env
 RUN_INTERNAL_JOBS=false
 ```
-
-Recommended follow-up:
-
-- add `RUN_INTERNAL_JOBS`
-- default it to `true` for local MVP convenience
-- set it to `false` on Render API service
-- set `APP_ROLE=worker` for the Render worker service
 
 This avoids duplicate intent evaluations and duplicate background jobs in production.
 
@@ -202,7 +208,7 @@ Recommended:
 - `DEFILLAMA_ENABLED=true`
 - `NANSEN_SMART_MONEY_CHAINS=ethereum,solana,base`
 - `RUN_MIGRATIONS=true` during controlled deploys
-- `RUN_INTERNAL_JOBS=false` on API service once implemented
+- `RUN_INTERNAL_JOBS=false` on API service when a separate worker is running
 
 Protocol execution env vars:
 
@@ -223,14 +229,9 @@ SEER_LENDLE_DEPOSIT_FUNCTION=deposit(address,uint256,address,uint16)
 
 ## Highest Priority Remaining Work
 
-1. Add `RUN_INTERNAL_JOBS` so API and worker can run in parallel without duplicate background execution.
-2. Choose and wire a smart-account/session-key provider SDK.
-3. Validate one end-to-end Lendle supply action on Mantle testnet.
-4. Add transaction simulation before returning executable drafts.
-5. Add Nansen token holder, token screener, and token flow mappings.
-6. Build a real Merchant Moe adapter only after route/ABI/quote details are verified.
-7. Persist more runtime job results and signal snapshots to Postgres.
-8. Add deployment manifests for Render API and Render Background Worker.
+1. Validate one complete Safe ERC-4337 user operation through the configured bundler.
+2. Validate one end-to-end Lendle supply action on Mantle testnet.
+3. Build a real Merchant Moe adapter only after route/ABI/quote details are verified.
 
 ## Verification Baseline
 

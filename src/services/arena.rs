@@ -12,6 +12,7 @@ use crate::models::arena::{
 pub struct ArenaService {
     predictions: RwLock<HashMap<Uuid, ArenaPrediction>>,
     entries: RwLock<HashMap<Uuid, ArenaEntry>>,
+    points: RwLock<HashMap<String, u32>>,
 }
 
 impl ArenaService {
@@ -20,6 +21,7 @@ impl ArenaService {
         Self {
             predictions: RwLock::new(HashMap::from([(prediction.id, prediction)])),
             entries: RwLock::new(HashMap::new()),
+            points: RwLock::new(HashMap::new()),
         }
     }
 
@@ -50,6 +52,26 @@ impl ArenaService {
         Ok(())
     }
 
+    pub fn user_points(&self, wallet_address: &str) -> u32 {
+        let key = wallet_address.to_lowercase();
+        *self
+            .points
+            .read()
+            .expect("arena points store poisoned")
+            .get(&key)
+            .unwrap_or(&1_000)
+    }
+
+    pub fn prediction_pool(&self, prediction_id: Uuid) -> u32 {
+        self.entries
+            .read()
+            .expect("arena entry store poisoned")
+            .values()
+            .filter(|entry| entry.prediction_id == prediction_id)
+            .map(|entry| entry.points_committed)
+            .sum()
+    }
+
     pub fn enter_prediction(
         &self,
         prediction_id: Uuid,
@@ -77,6 +99,14 @@ impl ArenaService {
         if already_entered {
             anyhow::bail!("wallet already entered this prediction");
         }
+
+        let wallet_key = request.wallet_address.to_lowercase();
+        let mut points = self.points.write().expect("arena points store poisoned");
+        let balance = *points.get(&wallet_key).unwrap_or(&1_000);
+        if request.points_committed > balance {
+            anyhow::bail!("insufficient points balance");
+        }
+        points.insert(wallet_key, balance - request.points_committed);
 
         let entry = ArenaEntry {
             id: Uuid::new_v4(),
@@ -106,6 +136,25 @@ impl ArenaService {
 
     pub fn leaderboard(&self) -> Vec<LeaderboardRow> {
         let mut rows_by_wallet: HashMap<String, LeaderboardRow> = HashMap::new();
+
+        for (wallet, balance) in self
+            .points
+            .read()
+            .expect("arena points store poisoned")
+            .iter()
+        {
+            rows_by_wallet.insert(
+                wallet.clone(),
+                LeaderboardRow {
+                    rank: 0,
+                    wallet_address: wallet.clone(),
+                    total_points: *balance as i32,
+                    weekly_gain: 0,
+                    accuracy_rate: None,
+                    entries_count: 0,
+                },
+            );
+        }
 
         for entry in self
             .entries
@@ -221,6 +270,6 @@ mod tests {
 
         assert_eq!(leaderboard[0].wallet_address, "0xleader");
         assert_eq!(leaderboard[0].entries_count, 1);
-        assert_eq!(leaderboard[0].total_points, 1_000);
+        assert_eq!(leaderboard[0].total_points, 900);
     }
 }

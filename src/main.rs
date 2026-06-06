@@ -41,7 +41,11 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn run_api(state: AppState) -> anyhow::Result<()> {
-    jobs::spawn_internal_jobs(state.clone());
+    if state.settings.run_internal_jobs {
+        jobs::spawn_internal_jobs(state.clone());
+    } else {
+        info!("seer api internal jobs disabled");
+    }
 
     let addr = SocketAddr::from(([0, 0, 0, 0], state.settings.port));
     let listener = TcpListener::bind(addr).await?;

@@ -6,6 +6,7 @@ pub mod contracts;
 pub mod data_provider;
 pub mod execution;
 pub mod identity;
+pub mod settings;
 pub mod signal_engine;
 pub mod wallet;
 
@@ -22,6 +23,7 @@ pub struct AppServices {
     pub identity: identity::IdentityService,
     pub arena: arena::ArenaService,
     pub agent: agent::AgentService,
+    pub settings: settings::SettingsService,
     pub execution: execution::ExecutionService,
     pub contracts: contracts::ContractService,
 }
@@ -40,6 +42,7 @@ impl AppServices {
             identity: identity::IdentityService::new(),
             arena: arena::ArenaService::new(),
             agent: agent::AgentService::new(),
+            settings: settings::SettingsService::new(),
             execution: execution::ExecutionService::new(settings.clone()),
             contracts: contracts::ContractService::new(settings),
             provider,

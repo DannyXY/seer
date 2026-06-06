@@ -1,0 +1,86 @@
+/* ============================================================
+   SEER — The Arena styles
+   ============================================================ */
+.seer-arena-grid { display: grid; grid-template-columns: 1fr 360px; gap: 24px; align-items: start; }
+@media (max-width: 900px) { .seer-arena-grid { grid-template-columns: 1fr; } }
+
+/* ---- points balance (header) ---- */
+.seer-balance {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex: none;
+  padding: 12px 18px; border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--card); box-shadow: inset 0 0 0 1px rgba(200,242,48,0.04);
+}
+
+/* ---- prediction card ---- */
+.seer-pred-list {
+  display: flex; flex-direction: column; gap: 16px;
+  max-height: 680px; overflow-y: auto; padding-right: 8px;
+}
+.seer-pred {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg);
+  padding: var(--pad-card); box-shadow: var(--sh-1);
+  transition: box-shadow .2s var(--ease), transform .2s var(--ease), border-color .2s var(--ease);
+}
+.seer-pred:hover { box-shadow: var(--sh-2); transform: translateY(-1px); }
+.seer-pred.hi { border-color: var(--coral-line); box-shadow: 0 0 0 1px var(--coral-line), 0 0 22px var(--coral-wash); }
+.seer-pred-claim { font-family: var(--font-display); font-size: 19px; font-weight: 500; line-height: 1.28; margin: 0 0 11px; }
+.seer-pred-reason { font-size: 13px; line-height: 1.55; color: var(--ink-2); margin: 0 0 16px; text-wrap: pretty; }
+
+/* odds bar */
+.seer-odds-bar { display: flex; height: 30px; border-radius: var(--r-sm); overflow: hidden; border: 1px solid var(--line); }
+.seer-odds-seer, .seer-odds-you {
+  display: flex; align-items: center; padding: 0 12px;
+  font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; color: #fff;
+  transition: width .8s var(--ease-out); min-width: fit-content; white-space: nowrap;
+}
+.seer-odds-seer { background: var(--coral); color: var(--volt-ink); }
+.seer-odds-you { background: var(--ink); color: var(--paper); justify-content: flex-end; }
+
+.seer-bet-btns { display: grid; grid-template-columns: 1.3fr 1fr; gap: 10px; }
+.seer-bet-agree, .seer-bet-against {
+  display: flex; align-items: center; justify-content: center; gap: 7px; white-space: nowrap;
+  padding: 11px; border-radius: var(--r-sm); font-size: 13.5px; font-weight: 500;
+  transition: transform .12s var(--ease), background .15s var(--ease), border-color .15s var(--ease);
+}
+.seer-bet-agree { background: var(--coral); color: var(--volt-ink); font-weight: 600; }
+.seer-bet-agree:hover { background: var(--coral-hover); }
+.seer-bet-against { background: var(--card); color: var(--ink); border: 1px solid var(--line); }
+.seer-bet-against:hover { border-color: var(--ink); }
+.seer-bet-agree:active, .seer-bet-against:active { transform: scale(0.98); }
+
+/* ---- bet modal ---- */
+.seer-amount { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
+/* .seer-range styled globally in styles.css */
+.seer-chip {
+  flex: 1; padding: 7px; border-radius: var(--r-xs); font-family: var(--font-mono); font-size: 12.5px;
+  border: 1px solid var(--line); background: var(--card); color: var(--ink-2); transition: all .12s var(--ease);
+}
+.seer-chip:hover { border-color: var(--coral-line); }
+.seer-chip.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.seer-payout { margin-top: 16px; padding: 14px; border-radius: var(--r-md); background: var(--card-2); border: 1px solid var(--line); }
+
+/* ---- record ---- */
+.seer-record { padding: 18px; }
+.seer-record-track { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 14px; }
+.seer-record-tick { width: 9px; height: 9px; border-radius: 3px; }
+
+/* ---- tabs ---- */
+.seer-tabs { display: flex; gap: 2px; background: var(--card-2); border-radius: var(--r-sm); padding: 3px; }
+.seer-tab {
+  flex: 1; padding: 8px; border-radius: var(--r-xs); font-size: 13px; font-weight: 500; color: var(--ink-2);
+  transition: all .15s var(--ease);
+}
+.seer-tab.active { background: var(--card); color: var(--ink); box-shadow: var(--sh-1); }
+
+.seer-betrow {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px; border-radius: var(--r-md); background: var(--card-2); border: 1px solid var(--line);
+}
+.seer-lb-row {
+  display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: var(--r-sm);
+}
+.seer-lb-row.you { background: var(--coral-wash); }
+.seer-you-tag {
+  font-family: var(--font-ui); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.08em;
+  background: var(--coral); color: var(--volt-ink); padding: 1px 6px; border-radius: 99px; margin-left: 8px;
+}

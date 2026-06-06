@@ -5,6 +5,7 @@ mod auth_guard;
 pub mod contracts;
 pub mod health;
 pub mod identity;
+pub mod settings;
 pub mod signals;
 pub mod wallet;
 
@@ -25,6 +26,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/wallet/:address/summary", get(wallet::summary))
         .route("/api/wallet/:address/activity", get(wallet::activity))
         .route("/api/wallet/:address/risk", get(wallet::risk))
+        .route(
+            "/api/settings/:address",
+            get(settings::get).post(settings::save),
+        )
         .route("/api/signals", get(signals::list))
         .route("/api/signals/:id", get(signals::get))
         .route("/api/identity/:address", get(identity::get))
@@ -52,6 +57,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/contracts/send-user-operation",
             post(contracts::send_user_operation),
+        )
+        .route(
+            "/api/contracts/simulate-transaction",
+            post(contracts::simulate_transaction),
         )
         .route(
             "/api/contracts/user-operation-receipt",

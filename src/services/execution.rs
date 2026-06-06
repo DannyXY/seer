@@ -65,6 +65,10 @@ impl ExecutionService {
             ("USDT", settings.mantle_usdt_address.clone()),
             ("MNT", settings.mantle_mnt_address.clone()),
             ("mETH", settings.mantle_meth_address.clone()),
+            ("USDY", settings.mantle_usdy_address.clone()),
+            ("WMNT", settings.mantle_wmnt_address.clone()),
+            ("WETH", settings.mantle_weth_address.clone()),
+            ("cmETH", settings.mantle_cmeth_address.clone()),
         ]
         .into_iter()
         .filter_map(|(symbol, address)| address.map(|address| (symbol.to_string(), address)))
@@ -118,6 +122,7 @@ impl ExecutionService {
             transaction_draft,
             required_authorization: "user-signed transaction or scoped delegated execution policy"
                 .to_string(),
+            protocol_operation: None,
         })
     }
 
@@ -566,12 +571,12 @@ fn token_decimals(asset: &str) -> u32 {
     }
 }
 
-fn known_protocols() -> [&'static str; 4] {
-    ["Merchant Moe", "Lendle", "Agni Finance", "mETH Protocol"]
+fn known_protocols() -> [&'static str; 5] {
+    ["Merchant Moe", "Agni Finance", "Fluxion Network", "mETH Protocol", "Ondo USDY"]
 }
 
 fn protocol_requires_explicit_config(protocol: &str) -> bool {
-    matches!(protocol, "Merchant Moe" | "Lendle" | "Agni Finance")
+    matches!(protocol, "Merchant Moe" | "Agni Finance" | "Fluxion Network")
 }
 
 fn protocol_strategies_from_settings(settings: &Settings) -> HashMap<String, ProtocolStrategy> {
@@ -587,17 +592,17 @@ fn protocol_strategies_from_settings(settings: &Settings) -> HashMap<String, Pro
     insert_protocol_strategy(
         &mut strategies,
         known_protocols()[1],
-        settings.lendle_strategy_address.clone(),
-        settings.lendle_spender_address.clone(),
-        settings.lendle_deposit_function.clone(),
+        settings.agni_strategy_address.clone(),
+        settings.agni_spender_address.clone(),
+        settings.agni_deposit_function.clone(),
         &settings.strategy_deposit_function,
     );
     insert_protocol_strategy(
         &mut strategies,
         known_protocols()[2],
-        settings.agni_strategy_address.clone(),
-        settings.agni_spender_address.clone(),
-        settings.agni_deposit_function.clone(),
+        settings.fluxion_strategy_address.clone(),
+        settings.fluxion_spender_address.clone(),
+        settings.fluxion_deposit_function.clone(),
         &settings.strategy_deposit_function,
     );
     insert_protocol_strategy(
@@ -606,6 +611,14 @@ fn protocol_strategies_from_settings(settings: &Settings) -> HashMap<String, Pro
         settings.meth_strategy_address.clone(),
         settings.meth_spender_address.clone(),
         settings.meth_deposit_function.clone(),
+        &settings.strategy_deposit_function,
+    );
+    insert_protocol_strategy(
+        &mut strategies,
+        known_protocols()[4],
+        settings.ondo_usdy_strategy_address.clone(),
+        settings.ondo_usdy_spender_address.clone(),
+        settings.ondo_usdy_deposit_function.clone(),
         &settings.strategy_deposit_function,
     );
     strategies

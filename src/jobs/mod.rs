@@ -1,8 +1,13 @@
+use chrono::Utc;
+use serde_json::json;
 use tokio::time::{interval, MissedTickBehavior};
 use tracing::info;
 
 use crate::{
-    db::{persist_agent_execution_log, persist_agent_execution_policy},
+    db::{
+        persist_agent_execution_log, persist_agent_execution_policy, persist_job_run,
+        persist_signals, JobRunRecord, JobRunStatus,
+    },
     AppState,
 };
 
@@ -43,11 +48,30 @@ async fn run_scheduler(state: AppState) {
 }
 
 async fn run_fast_jobs(state: &AppState) {
+    let started_at = Utc::now();
     let provider = state.services.provider.provider().await;
     let active_intents = state.services.agent.active_executable_intents();
     let mut evaluated_intents = 0usize;
     let mut actionable_intents = 0usize;
     let mut delegated_ready_intents = 0usize;
+    let mut signal_snapshots = 0usize;
+    let mut errors = Vec::new();
+
+    match state.services.signals.generate(provider).await {
+        Ok(signals) => {
+            signal_snapshots = signals.len();
+            if let Err(err) =
+                persist_signals(state.services.infra.postgres.as_ref(), &signals).await
+            {
+                tracing::warn!(error = %err, "failed to persist worker signal snapshots");
+                errors.push(format!("signal persistence failed: {err}"));
+            }
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "failed to generate worker signal snapshots");
+            errors.push(format!("signal generation failed: {err}"));
+        }
+    }
 
     for intent in active_intents {
         match state
@@ -81,6 +105,10 @@ async fn run_fast_jobs(state: &AppState) {
                     )
                     .await
                     {
+                        errors.push(format!(
+                            "intent {} delegated execution log persistence failed: {err}",
+                            intent.id
+                        ));
                         tracing::warn!(
                             intent_id = %intent.id,
                             policy_id = %policy.id,
@@ -99,6 +127,10 @@ async fn run_fast_jobs(state: &AppState) {
                             )
                             .await
                             {
+                                errors.push(format!(
+                                    "policy {} usage persistence failed: {err}",
+                                    policy.id
+                                ));
                                 tracing::warn!(
                                     intent_id = %intent.id,
                                     policy_id = %policy.id,
@@ -124,6 +156,10 @@ async fn run_fast_jobs(state: &AppState) {
                     )
                     .await
                     {
+                        errors.push(format!(
+                            "intent {} execution log persistence failed: {err}",
+                            intent.id
+                        ));
                         tracing::warn!(
                             intent_id = %intent.id,
                             error = %err,
@@ -134,6 +170,7 @@ async fn run_fast_jobs(state: &AppState) {
                 evaluated_intents += 1;
             }
             Err(err) => {
+                errors.push(format!("intent {} evaluation failed: {err}", intent.id));
                 tracing::warn!(
                     intent_id = %intent.id,
                     wallet_address = intent.wallet_address,
@@ -144,14 +181,51 @@ async fn run_fast_jobs(state: &AppState) {
         }
     }
 
+    let finished_at = Utc::now();
+    let status = if errors.is_empty() {
+        JobRunStatus::Success
+    } else if evaluated_intents > 0 || signal_snapshots > 0 {
+        JobRunStatus::PartialFailure
+    } else {
+        JobRunStatus::Failed
+    };
+    let job_run = JobRunRecord {
+        job_name: "fast_jobs".to_string(),
+        status,
+        provider: state.services.provider_name().to_string(),
+        summary: json!({
+            "jobs": ["signals", "condition_triggers"],
+            "signal_snapshots": signal_snapshots,
+            "evaluated_intents": evaluated_intents,
+            "actionable_intents": actionable_intents,
+            "delegated_ready_intents": delegated_ready_intents,
+        }),
+        started_at,
+        finished_at,
+        error: (!errors.is_empty()).then(|| errors.join("; ")),
+    };
+    if let Err(err) = persist_job_run(state.services.infra.postgres.as_ref(), &job_run).await {
+        tracing::warn!(error = %err, "failed to persist worker job run");
+    }
+
     info!(
         provider = state.services.provider_name(),
         jobs = "signals,condition_triggers",
+        signal_snapshots,
         evaluated_intents,
         actionable_intents,
         delegated_ready_intents,
+        status = job_run_status_log_label(status),
         "job tick"
     );
+}
+
+fn job_run_status_log_label(status: JobRunStatus) -> &'static str {
+    match status {
+        JobRunStatus::Success => "success",
+        JobRunStatus::PartialFailure => "partial_failure",
+        JobRunStatus::Failed => "failed",
+    }
 }
 
 async fn run_arena_refresh_jobs(state: &AppState) {
@@ -199,6 +273,7 @@ mod tests {
             version: "test".to_string(),
             database_url: None,
             run_migrations: false,
+            run_internal_jobs: true,
             redis_url: None,
             claude_api_key: None,
             claude_model: "claude-sonnet-4-20250514".to_string(),
@@ -215,7 +290,10 @@ mod tests {
             defillama_yields_base_url: "https://yields.llama.fi".to_string(),
             mantle_rpc_url: None,
             mantle_chain_id: 5003,
+            aa_provider_stack: "safe-4337-relay-kit".to_string(),
             aa_bundler_url: None,
+            aa_entry_point_address: None,
+            aa_paymaster_url: None,
             backend_signer_private_key: None,
             mantle_usdc_address: Some("0x0000000000000000000000000000000000000001".to_string()),
             mantle_usdt_address: None,

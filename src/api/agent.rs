@@ -16,7 +16,10 @@ use crate::{
             CreateIntentRequest, CreateSessionPolicyRequest, EvaluateIntentWithAllowanceRequest,
             IntentStatus,
         },
-        execution::Erc20AllowanceRequest,
+        execution::{
+            Erc20AllowanceRequest, ExecutionProposal, SimulateTransactionRequest,
+            SimulateTransactionResponse, TransactionDraft,
+        },
     },
     AppState,
 };
@@ -112,7 +115,7 @@ pub async fn evaluate_intent_with_allowance(
     let allowance_value = parse_rpc_u256(&allowance.allowance)
         .map_err(|err| ApiError::BadRequest(format!("invalid allowance value: {err}")))?;
     let provider = state.services.provider.provider().await;
-    let proposal = state
+    let mut proposal = state
         .services
         .execution
         .evaluate_intent_with_allowance(
@@ -126,12 +129,72 @@ pub async fn evaluate_intent_with_allowance(
         )
         .await
         .map_err(|err| ApiError::Service(err.to_string()))?;
+    let simulation = simulate_transaction_draft(&state, &mut proposal).await?;
 
     Ok(Json(json!({
         "parsed_intent": parsed,
         "allowance": allowance,
+        "simulation": simulation,
         "proposal": proposal
     })))
+}
+
+async fn simulate_transaction_draft(
+    state: &AppState,
+    proposal: &mut ExecutionProposal,
+) -> Result<Option<SimulateTransactionResponse>, ApiError> {
+    let Some(draft) = proposal.transaction_draft.as_ref() else {
+        return Ok(None);
+    };
+    let Some(to) = draft.to.clone() else {
+        return Ok(None);
+    };
+    let Some(data) = draft.data.clone() else {
+        return Ok(None);
+    };
+
+    let simulation = state
+        .services
+        .contracts
+        .simulate_transaction(SimulateTransactionRequest {
+            from: Some(simulation_from_address(proposal)),
+            to,
+            value: Some(draft.value.clone()),
+            data: Some(data),
+        })
+        .await
+        .map_err(|err| ApiError::BadRequest(err.to_string()))?;
+
+    if !simulation.success {
+        proposal.transaction_draft = Some(simulation_failed_draft(
+            proposal.chain_id,
+            simulation.error.as_deref(),
+        ));
+    }
+
+    Ok(Some(simulation))
+}
+
+fn simulation_from_address(proposal: &ExecutionProposal) -> String {
+    proposal
+        .allowance_check
+        .as_ref()
+        .map(|allowance| allowance.owner_address.clone())
+        .unwrap_or_else(|| proposal.wallet_address.clone())
+}
+
+fn simulation_failed_draft(chain_id: u64, error: Option<&str>) -> TransactionDraft {
+    let reason = error.unwrap_or("RPC did not provide a revert reason");
+    TransactionDraft {
+        kind: "simulation_failed".to_string(),
+        to: None,
+        value: "0".to_string(),
+        data: None,
+        chain_id,
+        human_summary: format!(
+            "Transaction simulation failed on Mantle RPC; Seer will not surface executable calldata until this is fixed. {reason}"
+        ),
+    }
 }
 
 pub async fn create_intent(
@@ -166,7 +229,12 @@ fn parse_rpc_u256(value: &str) -> anyhow::Result<U256> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_rpc_u256;
+    use super::{
+        parse_rpc_u256, simulation_failed_draft, simulation_from_address,
+        validate_session_policy_request,
+    };
+    use crate::models::agent::CreateSessionPolicyRequest;
+    use crate::models::execution::{Erc20AllowanceRequest, ExecutionProposal};
 
     #[test]
     fn parses_rpc_hex_allowance() {
@@ -176,6 +244,57 @@ mod tests {
     #[test]
     fn rejects_empty_rpc_allowance() {
         assert!(parse_rpc_u256("0x").is_err());
+    }
+
+    #[test]
+    fn simulation_failed_draft_strips_executable_fields() {
+        let draft = simulation_failed_draft(5003, Some("execution reverted"));
+
+        assert_eq!(draft.kind, "simulation_failed");
+        assert!(draft.to.is_none());
+        assert!(draft.data.is_none());
+        assert!(draft.human_summary.contains("execution reverted"));
+    }
+
+    #[test]
+    fn simulation_uses_allowance_owner_when_available() {
+        let proposal = ExecutionProposal {
+            actionable: true,
+            action: "accumulate".to_string(),
+            wallet_address: "0x00000000000000000000000000000000000000aa".to_string(),
+            chain_id: 5003,
+            network: "mantle-testnet".to_string(),
+            conditions: vec![],
+            allowance_check: Some(Erc20AllowanceRequest {
+                token_address: "0x0000000000000000000000000000000000000001".to_string(),
+                owner_address: "0x00000000000000000000000000000000000000bb".to_string(),
+                spender_address: "0x0000000000000000000000000000000000000002".to_string(),
+            }),
+            transaction_draft: None,
+            required_authorization: "test".to_string(),
+            protocol_operation: None,
+        };
+
+        assert_eq!(
+            simulation_from_address(&proposal),
+            "0x00000000000000000000000000000000000000bb"
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_session_policy_addresses() {
+        let request = CreateSessionPolicyRequest {
+            smart_account_address: "0xsmartaccount".to_string(),
+            session_key_address: "0x00000000000000000000000000000000000000cc".to_string(),
+            allowed_assets: vec!["USDC".to_string()],
+            allowed_protocols: vec!["mETH Protocol".to_string()],
+            allowed_contracts: vec!["0x0000000000000000000000000000000000000002".to_string()],
+            max_spend_usd: Some(25.0),
+            max_transaction_count: Some(1),
+            expires_in_days: Some(1),
+        };
+
+        assert!(validate_session_policy_request(&request).is_err());
     }
 }
 
@@ -282,6 +401,7 @@ pub async fn create_session_policy(
         .get_intent(intent_id)
         .ok_or(ApiError::NotFound)?;
     require_wallet(&state, &headers, &intent.wallet_address)?;
+    validate_session_policy_request(&req)?;
     let policy = state.services.agent.create_session_policy(&intent, req);
     persist_agent_execution_policy(state.services.infra.postgres.as_ref(), &policy)
         .await
@@ -367,6 +487,37 @@ pub async fn revoke_policy(
         .map_err(|err| ApiError::Service(err.to_string()))?;
 
     Ok(Json(json!({ "policy": revoked })))
+}
+
+fn validate_session_policy_request(req: &CreateSessionPolicyRequest) -> Result<(), ApiError> {
+    validate_hex_address(&req.smart_account_address, "smart_account_address")?;
+    validate_hex_address(&req.session_key_address, "session_key_address")?;
+    for contract in &req.allowed_contracts {
+        validate_hex_address(contract, "allowed_contracts[]")?;
+    }
+    if req.allowed_assets.is_empty() {
+        return Err(ApiError::BadRequest(
+            "allowed_assets must include at least one asset".to_string(),
+        ));
+    }
+    if req.allowed_protocols.is_empty() {
+        return Err(ApiError::BadRequest(
+            "allowed_protocols must include at least one protocol".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_hex_address(value: &str, name: &str) -> Result<(), ApiError> {
+    let hex = value
+        .strip_prefix("0x")
+        .ok_or_else(|| ApiError::BadRequest(format!("{name} must be a 0x-prefixed address")))?;
+    if hex.len() != 40 || !hex.chars().all(|character| character.is_ascii_hexdigit()) {
+        return Err(ApiError::BadRequest(format!(
+            "{name} must be a 0x-prefixed address"
+        )));
+    }
+    Ok(())
 }
 
 pub async fn pause(

@@ -32,7 +32,7 @@ Rust Axum backend
 
 ## Durable State
 
-When `DATABASE_URL` is configured, Seer persists created agent intents, execution policies, and agent execution logs to PostgreSQL. If Postgres is not configured, the same API remains usable with in-memory state for local demo reliability.
+When `DATABASE_URL` is configured, Seer persists generated signal snapshots, created agent intents, execution policies, agent execution logs, and worker job-run summaries to PostgreSQL. If Postgres is not configured, the same API remains usable with in-memory state for local demo reliability.
 
 Set `RUN_MIGRATIONS=true` to run SQLx migrations on startup. It defaults to `false` so copying `.env.example` does not break local demo runs when Postgres is not available.
 
@@ -137,6 +137,7 @@ GET  /api/contracts/readiness
 GET  /api/contracts/execution-readiness
 POST /api/contracts/send-raw-transaction
 POST /api/contracts/send-user-operation
+POST /api/contracts/simulate-transaction
 POST /api/contracts/user-operation-receipt
 POST /api/contracts/erc20-allowance
 ```
@@ -151,7 +152,7 @@ intent -> condition evaluation -> execution proposal -> user signs transaction -
 
 `POST /api/agent/evaluate-intent` evaluates parsed conditions against provider facts and returns an execution proposal.
 
-`POST /api/agent/evaluate-intent-with-allowance` also reads ERC-20 allowance from Mantle RPC and returns the correct next draft: approval calldata when allowance is low, or strategy calldata when allowance already covers the spend.
+`POST /api/agent/evaluate-intent-with-allowance` also reads ERC-20 allowance from Mantle RPC and simulates concrete transaction drafts with `eth_call` before returning them. If simulation fails, Seer returns a non-runnable `simulation_failed` draft instead of executable calldata.
 
 `POST /api/contracts/send-raw-transaction` relays a complete user-signed transaction through `eth_sendRawTransaction` when `MANTLE_RPC_URL` is configured.
 
@@ -164,7 +165,7 @@ MANTLE_CHAIN_ID=5003
 
 Backend-signed actions are intentionally gated behind explicit `BACKEND_SIGNER_PRIVATE_KEY` and scoped execution policies.
 
-Active intents are evaluated when activated and then by the worker's fast job loop. Each evaluation records an execution log containing condition results, actionability, transaction draft, and reasoning hash.
+Active intents are evaluated when activated and then by the worker's fast job loop. Each evaluation records an execution log containing condition results, actionability, transaction draft, and reasoning hash. The fast job also persists generated signal snapshots and a `job_runs` summary when Postgres is configured.
 
 When token and strategy addresses are configured, Seer can emit runnable ERC-20 approval calldata for Mantle testnet:
 
@@ -182,7 +183,19 @@ For example, `accumulate 25 USDC` can produce an `erc20_approve` draft with `to=
 
 `POST /api/contracts/erc20-allowance` checks existing token allowance through Mantle RPC. When allowance is already sufficient, Seer can skip the approval transaction and build a configured strategy call such as `deposit(address,uint256)` with `to=<strategy>` and `data=deposit(token, amount)`.
 
+`POST /api/contracts/simulate-transaction` dry-runs a draft transaction through Mantle RPC using `eth_call`. It is useful for clients and operators that want to check calldata before asking a wallet or smart-account provider to sign.
+
 `GET /api/contracts/execution-readiness` reports configured token addresses and named protocol destinations, including Merchant Moe, Lendle, Agni Finance, and mETH Protocol. Readiness includes both the execution target and approval spender for each protocol.
+
+`GET /api/contracts/readiness` includes `live_validation.safe_user_operation` and `live_validation.lendle_supply`. Check those before live execution; each object reports `ready`, missing env/config fields, and the next validation step.
+
+For a repeatable local check against a running API:
+
+```bash
+scripts/live-validation-smoke.sh
+```
+
+Set `REQUIRE_SAFE_READY=1` or `REQUIRE_LENDLE_READY=1` to make the script fail when that live path is not fully configured.
 
 ## Recurring Automation
 
@@ -195,7 +208,8 @@ Seer stores scoped session policy
 worker/evaluate checks conditions
 delegated execution enforces policy
 Seer builds user-operation draft
-AA provider/bundler submits the operation
+Safe ERC-4337 provider signs/builds the complete user operation
+bundler submits the operation
 ```
 
 Session policies include:
@@ -212,16 +226,16 @@ Session policies include:
 
 `POST /api/agent/intent/:intent_id/delegated-execute` only returns an executable user-operation draft when the intent is actionable and the active session policy allows it.
 
-`AA_BUNDLER_URL` is reserved for the provider-specific ERC-4337 bundler integration.
+`AA_PROVIDER_STACK` defaults to `safe-4337-relay-kit`, matching Safe Smart Accounts with Safe4337Module support and provider-built user operations. `AA_ENTRY_POINT_ADDRESS` and `AA_BUNDLER_URL` must be configured before Seer reports user-operation relay readiness. `AA_PAYMASTER_URL` is optional for sponsored execution.
 
-When `AA_BUNDLER_URL` is configured, Seer can relay already-built ERC-4337 user operations:
+When the bundler and entry point are configured, Seer can relay already-built ERC-4337 user operations:
 
 ```text
 POST /api/contracts/send-user-operation
 POST /api/contracts/user-operation-receipt
 ```
 
-The backend still expects the smart-account provider/session-key flow to build and authorize the full user operation before relay.
+The backend validates session-policy addresses and provider-built user-operation shape before relay. It still expects the Safe ERC-4337 provider/session-key flow to build, authorize, and sign the full user operation before Seer sends it to the bundler.
 
 ## Authentication
 
@@ -270,4 +284,4 @@ Recommended mapping from `nansen-ai/nansen-skills`:
 - `nansen-token` -> Token flow signals
 - `nansen-portfolio` -> Portfolio positions and wallet summary
 
-The current `NansenProvider` wires Nansen's `portfolio/defi-holdings` endpoint for wallet positions and wallet profile summaries, plus `smart-money/holdings` for Signal Engine smart-money movement inputs. Protocol TVL/APY condition checks can use DeFiLlama through `DEFILLAMA_ENABLED=true`, falling back to mock data if unavailable. Token-flow, transaction, token screener, top-holder, and Nansen-native protocol metric methods still fall back through `ProviderRegistry` until their live response schemas are mapped. `MockProvider` remains the deterministic Mantle-oriented demo fallback.
+The current `NansenProvider` wires Nansen's `portfolio/defi-holdings` endpoint for wallet positions and wallet profile summaries, `smart-money/holdings` and `token-screener` for Signal Engine smart-money movement inputs, plus Token God Mode `tgm/flows` and `tgm/holders` for token-flow signals when Mantle token addresses are configured. Protocol TVL/APY condition checks can use DeFiLlama through `DEFILLAMA_ENABLED=true`, falling back to mock data if unavailable. Wallet transaction and Nansen-native protocol metric methods still fall back through `ProviderRegistry` until their live response schemas are mapped. `MockProvider` remains the deterministic Mantle-oriented demo fallback.

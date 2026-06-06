@@ -118,7 +118,7 @@ curl -X POST http://localhost:10000/api/agent/evaluate-intent-with-allowance \
   }'
 ```
 
-This evaluates provider conditions and reads ERC-20 allowance from Mantle RPC in one call. If the intent asset and protocol destination are configured, Seer derives the token and spender from the parsed intent. If they are not configured, include `token_address` and `spender_address` explicitly. The returned proposal gives the next transaction draft: approval if allowance is low, strategy execution if allowance is sufficient.
+This evaluates provider conditions and reads ERC-20 allowance from Mantle RPC in one call. If the intent asset and protocol destination are configured, Seer derives the token and spender from the parsed intent. If they are not configured, include `token_address` and `spender_address` explicitly. The returned proposal gives the next transaction draft: approval if allowance is low, strategy execution if allowance is sufficient. Concrete calldata drafts are simulated with Mantle `eth_call`; failed simulations return a `simulation_failed` draft without executable `to` or `data` fields.
 
 ## Check ERC-20 Allowance
 
@@ -135,10 +135,50 @@ curl -X POST http://localhost:10000/api/contracts/erc20-allowance \
 
 If allowance covers the intended spend amount, Seer can draft the configured strategy call instead of another approval.
 
+## Simulate Transaction Draft
+
+```bash
+curl -X POST http://localhost:10000/api/contracts/simulate-transaction \
+  -H 'authorization: Bearer <token>' \
+  -H 'content-type: application/json' \
+  -d '{
+    "from": "0xWalletOrSmartAccount",
+    "to": "0xStrategyOrToken",
+    "value": "0",
+    "data": "0xCalldata"
+  }'
+```
+
+This dry-runs the draft through Mantle RPC using `eth_call`. A successful response includes `success=true` and return data. A revert returns `success=false` with the RPC error so the client can block signing.
+
 ## Mantle RPC Readiness
 
 ```bash
 curl http://localhost:10000/api/contracts/readiness
+```
+
+Check `live_validation.safe_user_operation` and `live_validation.lendle_supply` before trying either live path. If `ready=false`, the `missing` array names the env/config values to set first.
+
+For a repeatable local smoke check:
+
+```bash
+scripts/live-validation-smoke.sh
+```
+
+To make the smoke check fail unless a live path is ready:
+
+```bash
+REQUIRE_SAFE_READY=1 scripts/live-validation-smoke.sh
+REQUIRE_LENDLE_READY=1 scripts/live-validation-smoke.sh
+```
+
+To also run the Lendle allowance/simulation preview, provide an authenticated wallet session:
+
+```bash
+SEER_AUTH_TOKEN=<token> \
+SEER_WALLET_ADDRESS=0xYourWallet \
+RUN_LENDLE_EVAL=1 \
+scripts/live-validation-smoke.sh
 ```
 
 ## Execution Destination Readiness
@@ -211,7 +251,16 @@ This evaluates the active intent, enforces the session-key policy, records an ex
 
 ## Submit User Operation
 
-After a smart-account provider builds and signs a complete user operation:
+After the Safe ERC-4337 provider builds and signs a complete user operation, configure:
+
+```env
+AA_PROVIDER_STACK=safe-4337-relay-kit
+AA_ENTRY_POINT_ADDRESS=
+AA_BUNDLER_URL=
+AA_PAYMASTER_URL=
+```
+
+Then submit the provider-built operation:
 
 ```bash
 curl -X POST http://localhost:10000/api/contracts/send-user-operation \
@@ -223,6 +272,11 @@ curl -X POST http://localhost:10000/api/contracts/send-user-operation \
       "sender": "0xSmartAccount",
       "nonce": "0x0",
       "callData": "0x...",
+      "callGasLimit": "0x...",
+      "verificationGasLimit": "0x...",
+      "preVerificationGas": "0x...",
+      "maxFeePerGas": "0x...",
+      "maxPriorityFeePerGas": "0x...",
       "signature": "0x..."
     }
   }'

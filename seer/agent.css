@@ -1,0 +1,193 @@
+/* ============================================================
+   SEER — My Agent: conversational UI
+   ============================================================ */
+
+/* ---- the orb: Seer's face ---- */
+.seer-orb { position: relative; flex-shrink: 0; display: inline-block; border-radius: 50%; }
+.seer-orb-core {
+  position: absolute; inset: 0; border-radius: 50%;
+  background:
+    radial-gradient(circle at 32% 28%, color-mix(in oklch, var(--coral) 55%, white) 0%, var(--coral) 42%, var(--coral-hover) 100%);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--coral) 50%, transparent),
+              0 4px 14px color-mix(in oklch, var(--coral) 45%, transparent);
+  animation: orbFloat calc(5s / var(--motion)) var(--ease) infinite;
+}
+.seer-orb-core::after {
+  content: ""; position: absolute; inset: 18%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.85) 0%, transparent 55%);
+  opacity: 0.5;
+}
+.seer-orb-ring {
+  position: absolute; inset: -3px; border-radius: 50%;
+  border: 1.5px solid color-mix(in oklch, var(--coral) 40%, transparent);
+  opacity: 0;
+}
+.seer-orb.thinking .seer-orb-ring { animation: orbPing calc(1.6s / var(--motion)) var(--ease-out) infinite; }
+.seer-orb.thinking .seer-orb-core { animation-duration: calc(2.2s / var(--motion)); }
+@keyframes orbFloat { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-2px) scale(1.03); } }
+@keyframes orbPing { 0% { transform: scale(0.9); opacity: 0.7; } 100% { transform: scale(1.8); opacity: 0; } }
+
+/* ---- shell: chat + intents rail ---- */
+.seer-agent-shell {
+  display: grid; grid-template-columns: 1fr 340px;
+  height: 100%; min-height: 0;
+}
+/* Tablet: hide the rail, stack to a single full-width column.
+   Use flex (not a 1-col grid) so no empty 340px track can linger. */
+@media (max-width: 1080px) {
+  .seer-agent-shell { display: flex; flex-direction: column; }
+  .seer-agent-shell > .seer-chat { flex: 1; min-height: 0; }
+}
+/* Mobile: let the screen scroll normally; pin the composer above the bottom nav. */
+@media (max-width: 720px) {
+  .seer-main.agent-mode { display: block; overflow-y: auto; }
+  .seer-agent-shell { height: auto; min-height: 100%; }
+  .seer-chat-scroll { overflow: visible; }
+  .seer-chat-head { position: sticky; top: 0; }
+  .seer-composer { position: sticky; bottom: 0; background: var(--paper); z-index: 6; }
+}
+
+/* ---- chat column ---- */
+.seer-chat { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.seer-chat-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px clamp(20px, 4vw, 40px); border-bottom: 1px solid var(--line);
+  background: color-mix(in oklch, var(--paper) 80%, transparent); backdrop-filter: blur(8px);
+  position: sticky; top: 0; z-index: 4;
+}
+.seer-chat-scroll { flex: 1; overflow-y: auto; min-height: 0; }
+.seer-chat-inner { max-width: 720px; margin: 0 auto; padding: 28px clamp(20px, 4vw, 40px) 12px; }
+
+/* ---- message rows ---- */
+.seer-msg { display: flex; gap: 11px; margin-bottom: 18px; align-items: flex-start; }
+.seer-msg.from-user { flex-direction: row-reverse; }
+.seer-bubble {
+  max-width: 78%; padding: 13px 16px; border-radius: 16px;
+  font-size: 14.5px; line-height: 1.55;
+}
+.from-seer .seer-bubble {
+  background: var(--card); border: 1px solid var(--line); border-top-left-radius: 5px;
+  color: var(--ink);
+}
+.from-user .seer-bubble {
+  background: color-mix(in oklch, var(--ink) 16%, var(--card));
+  color: var(--ink); border-top-right-radius: 5px;
+  border: 1px solid var(--line);
+}
+.from-user .seer-line { color: var(--ink); }
+.seer-line { margin: 0 0 8px; text-wrap: pretty; }
+.seer-line:last-child { margin-bottom: 0; }
+@keyframes msgIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+/* serif lift for Seer's voice */
+.from-seer .seer-line:first-child { font-family: var(--font-display); font-size: 16px; }
+
+/* ---- typing ---- */
+.seer-typing { display: flex; align-items: center; gap: 10px; }
+.seer-typing-label { font-size: 13px; color: var(--ink-2); }
+.seer-dots { display: inline-flex; gap: 4px; }
+.seer-dots i { width: 6px; height: 6px; border-radius: 99px; background: var(--coral); opacity: 0.4; animation: dotPulse 1.2s var(--ease) infinite; }
+.seer-dots i:nth-child(2) { animation-delay: 0.18s; }
+.seer-dots i:nth-child(3) { animation-delay: 0.36s; }
+@keyframes dotPulse { 0%,100% { opacity: 0.3; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-3px); } }
+
+/* ---- starter / inline chips ---- */
+.seer-starter-chips { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0 0 39px; }
+.seer-starter-chip, .seer-chip-sug {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 15px; border-radius: 99px; font-size: 13.5px; font-weight: 500;
+  background: var(--card); border: 1px solid var(--line); color: var(--ink);
+  transition: border-color .15s var(--ease), background .15s var(--ease), transform .12s var(--ease);
+}
+.seer-starter-chip:hover, .seer-chip-sug:hover { border-color: var(--coral-line); background: var(--coral-wash); transform: translateY(-1px); }
+.seer-inline-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.seer-chip-sug { padding: 8px 13px; font-size: 12.5px; }
+
+/* ---- confirm-agent card ---- */
+.seer-confirm {
+  max-width: 410px; width: 100%;
+  background: var(--card-2); border: 1px solid var(--line); border-radius: 16px;
+  border-top-left-radius: 5px; padding: 18px 20px; box-shadow: var(--sh-2);
+}
+.seer-confirm.done { opacity: 0.92; }
+.seer-confirm-top { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.seer-confirm-top .eyebrow { white-space: nowrap; }
+.seer-confirm-bar { width: 22px; height: 3px; border-radius: 3px; flex-shrink: 0; }
+.seer-confirm-title { font-size: 21px; font-weight: 500; margin-bottom: 14px; line-height: 1.15; }
+.seer-confirm-rows { display: flex; flex-direction: column; }
+.seer-confirm-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 10px 0; border-bottom: 1px solid var(--line-soft);
+}
+.seer-confirm-row:first-child { padding-top: 0; }
+.seer-confirm-k { font-size: 13px; color: var(--ink-2); flex-shrink: 0; white-space: nowrap; }
+.seer-confirm-v { font-size: 13px; font-weight: 500; text-align: right; display: inline-flex; align-items: center; gap: 7px; justify-content: flex-end; white-space: nowrap; }
+.seer-tok-mini {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 99px; border: 1px solid; font-size: 11px; font-family: var(--font-mono);
+}
+.seer-confirm-chip {
+  display: flex; align-items: center; gap: 11px; margin-top: 14px;
+  padding: 12px; border-radius: var(--r-md); background: var(--card); border: 1px solid var(--line);
+}
+.seer-confirm-chip-ic { width: 32px; height: 32px; border-radius: 99px; font-family: var(--font-mono); font-size: 15px; font-weight: 600; flex-shrink: 0; }
+.seer-confirm-actions { display: flex; gap: 10px; margin-top: 16px; }
+.seer-confirm-done {
+  display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 16px;
+  padding: 11px; border-radius: var(--r-sm); background: var(--c-opp-wash); color: var(--ink); font-size: 13.5px; font-weight: 500;
+}
+
+/* ---- composer ---- */
+.seer-composer { padding: 14px clamp(20px, 4vw, 40px) 18px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.seer-composer-box {
+  display: flex; align-items: center; gap: 8px; max-width: 720px; margin: 0 auto; width: 100%;
+  padding: 7px 7px 7px 18px; border-radius: 99px;
+  background: var(--card); border: 1px solid var(--line);
+  transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
+}
+.seer-composer-box:focus-within { border-color: var(--coral-line); box-shadow: 0 0 0 3px var(--coral-wash); }
+.seer-composer-box input { flex: 1; border: none; outline: none; background: none; font-size: 14.5px; color: var(--ink); }
+.seer-composer-box input::placeholder { color: var(--ink-3s); }
+.seer-send {
+  width: 40px; height: 40px; border-radius: 99px; flex-shrink: 0;
+  background: var(--coral); color: var(--volt-ink); display: flex; align-items: center; justify-content: center;
+  transition: background .15s var(--ease), transform .12s var(--ease), opacity .15s;
+}
+.seer-send:hover:not(:disabled) { background: var(--coral-hover); }
+.seer-send:active:not(:disabled) { transform: scale(0.94); }
+.seer-send:disabled { opacity: 0.4; cursor: default; }
+
+/* ---- intents rail ---- */
+.seer-intents-rail {
+  border-left: 1px solid var(--line); background: var(--paper-sink);
+  padding: 22px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
+}
+.seer-rail-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.seer-rail-header .serif { white-space: nowrap; }
+@media (max-width: 1080px) { .seer-intents-rail { display: none; } }
+.seer-rail-intent {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-md); padding: 14px;
+  transition: box-shadow .2s var(--ease), border-color .2s var(--ease);
+}
+.seer-rail-intent:hover { box-shadow: var(--sh-1); border-color: var(--coral-line); }
+.seer-rail-btn {
+  flex: 1; padding: 7px; border-radius: var(--r-xs); font-size: 12px; font-weight: 500;
+  background: var(--card-2); border: 1px solid var(--line); color: var(--ink-2);
+  transition: all .12s var(--ease);
+}
+.seer-rail-btn:hover { color: var(--ink); border-color: var(--coral-line); }
+
+/* ---- trace modal (shared) ---- */
+.seer-trace-modal { width: min(620px, 94vw); max-height: 86vh; display: flex; flex-direction: column; animation: fadeScale .28s var(--ease-out) both; overflow: hidden; }
+.seer-trace-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 22px 24px; border-bottom: 1px solid var(--line); }
+.seer-trace-body { padding: 8px 24px 24px; overflow-y: auto; }
+.seer-timeline { position: relative; padding-left: 22px; margin-top: 16px; }
+.seer-timeline::before { content: ""; position: absolute; left: 5px; top: 6px; bottom: 6px; width: 1.5px; background: var(--line); }
+.seer-trace-item { position: relative; padding-bottom: 22px; }
+.seer-trace-item:last-child { padding-bottom: 4px; }
+.seer-trace-node { position: absolute; left: -22px; top: 3px; width: 11px; height: 11px; border-radius: 99px; background: var(--card); border: 2.5px solid var(--coral); }
+
+/* the agent screen owns the full main height — disable main scroll */
+.seer-main.agent-mode { overflow: hidden; display: flex; }
+.seer-main.agent-mode > .seer-agent-shell { flex: 1; }

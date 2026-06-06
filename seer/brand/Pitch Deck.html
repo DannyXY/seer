@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Seer — Pitch Deck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="seer-brand.css" />
+<style>
+  deck-stage:not(:defined){ visibility:hidden; }
+  html,body{ background:#000; }
+
+  /* ---------- slide scaffold ---------- */
+  .slide{ width:100%; height:100%; position:relative; padding:92px 120px; display:flex; flex-direction:column;
+    background: var(--graphite); overflow:hidden; }
+  .slide.glow{ background:
+      radial-gradient(1100px 620px at 86% -6%, rgba(200,242,48,0.10), transparent 58%),
+      radial-gradient(900px 520px at 8% 110%, rgba(78,155,255,0.06), transparent 60%),
+      var(--graphite); }
+  .slide.panel-bg{ background:
+      radial-gradient(1000px 560px at 50% -10%, rgba(200,242,48,0.05), transparent 60%),
+      #0C0E11; }
+
+  .s-eyebrow{ font-family:var(--font-mono); font-size:24px; letter-spacing:0.2em; text-transform:uppercase; color:var(--ink-3); }
+  .s-eyebrow b{ color:var(--volt); font-weight:500; }
+  .s-title{ font-family:var(--font-display); font-weight:800; text-transform:uppercase; letter-spacing:-0.03em; line-height:0.98; font-size:78px; margin:0; }
+  .s-title em{ font-style:normal; color:var(--volt); }
+  .s-sub{ font-size:27px; color:var(--ink-2); line-height:1.45; max-width:1040px; }
+  .s-sub b{ color:var(--ink); font-weight:600; }
+
+  /* footer chrome */
+  .s-foot{ position:absolute; left:120px; right:120px; bottom:54px; display:flex; align-items:center; justify-content:space-between;
+    font-family:var(--font-mono); font-size:18px; color:var(--ink-3); letter-spacing:0.08em; }
+  .s-foot .brand{ display:flex; align-items:center; gap:11px; color:var(--ink-2); }
+  .s-foot .brand .wm{ font-family:var(--font-display); font-weight:800; letter-spacing:-0.01em; font-size:20px; color:var(--ink); }
+
+  .mk{ display:inline-flex; }
+
+  /* big hero mark with glow */
+  .hero-mark{ filter: drop-shadow(0 0 40px rgba(200,242,48,0.12)); }
+
+  /* cards reused from brand */
+  .scard{ background:var(--panel); border:1px solid var(--line); border-radius:var(--r-lg); padding:26px 28px; position:relative; overflow:hidden; }
+  .scard .spine{ position:absolute; left:0; top:0; bottom:0; width:4px; }
+  .scard h4{ font-family:var(--font-display); font-weight:700; font-size:28px; letter-spacing:-0.02em; margin:16px 0 11px; line-height:1.1; }
+  .scard p{ color:var(--ink-2); font-size:18px; line-height:1.5; margin:0; }
+  .badge{ font-size:14px; padding:5px 11px; }
+  .pill{ font-size:15px; padding:5px 13px; }
+  .eyebrow{ font-size:15px; }
+  .btn{ font-size:16px; padding:12px 20px; }
+  .num{ font-feature-settings:"tnum" 1; }
+
+  .lede-num{ font-family:var(--font-display); font-weight:900; letter-spacing:-0.03em; line-height:0.9; }
+
+  /* prism diagram */
+  .spectrum-key{ display:flex; flex-direction:column; gap:18px; }
+  .skey{ display:flex; align-items:flex-start; gap:16px; }
+  .skey .sw{ width:14px; height:14px; border-radius:4px; margin-top:5px; flex:none; }
+  .skey .nm{ font-family:var(--font-display); font-weight:700; font-size:22px; text-transform:uppercase; letter-spacing:-0.01em; }
+  .skey .ds{ color:var(--ink-2); font-size:16.5px; line-height:1.4; margin-top:2px; }
+
+  /* stat strip */
+  .stat{ display:flex; flex-direction:column; gap:6px; }
+  .stat .v{ font-family:var(--font-display); font-weight:800; font-size:52px; letter-spacing:-0.03em; line-height:1; }
+  .stat .v.volt{ color:var(--volt); }
+  .stat .l{ font-family:var(--font-mono); font-size:14px; color:var(--ink-2); letter-spacing:0.04em; }
+
+  /* why-mantle reasons */
+  .reason{ border-top:1px solid var(--line); padding:22px 0; display:flex; gap:22px; align-items:flex-start; }
+  .reason .n{ font-family:var(--font-mono); color:var(--volt); font-size:16px; width:40px; flex:none; }
+  .reason .h{ font-family:var(--font-display); font-weight:700; font-size:24px; letter-spacing:-0.01em; }
+  .reason .d{ color:var(--ink-2); font-size:17px; line-height:1.45; margin-top:5px; max-width:560px; }
+
+  .chip{ display:inline-flex; align-items:center; gap:10px; background:var(--panel); border:1px solid var(--line);
+    border-radius:var(--r-md); padding:14px 18px; font-size:18px; }
+  .chip .d{ width:9px; height:9px; border-radius:99px; }
+
+  /* entrance — transform-only stagger (never touches opacity), so content
+     is ALWAYS visible: frozen, printed, exported, or reduced-motion. The
+     deck-stage crossfades whole slides on its own; this just adds a settle. */
+  .anim{ }
+  @media (prefers-reduced-motion:no-preference){
+    [data-deck-active] .anim{ animation:rise .6s var(--ease-out) both; }
+    [data-deck-active] .anim.d1{ animation-delay:.07s; }
+    [data-deck-active] .anim.d2{ animation-delay:.14s; }
+    [data-deck-active] .anim.d3{ animation-delay:.21s; }
+    [data-deck-active] .anim.d4{ animation-delay:.28s; }
+    [data-deck-active] .anim.d5{ animation-delay:.35s; }
+  }
+  @keyframes rise{ from{ transform:translateY(22px); } to{ transform:translateY(0); } }
+</style>
+</head>
+<body>
+
+<template id="prism">
+  <svg viewBox="0 0 100 100" fill="none" style="display:block;width:100%;height:100%">
+    <polygon points="50,14 84,77 16,77" stroke="var(--mk,#EDEFF2)" stroke-width="3.4" stroke-linejoin="round"/>
+    <line x1="1" y1="57" x2="30" y2="57" stroke="var(--mk,#EDEFF2)" stroke-width="3.4" stroke-linecap="round"/>
+    <line x1="60" y1="50" x2="99" y2="33" stroke="#4E9BFF" stroke-width="3.4" stroke-linecap="round"/>
+    <line x1="60" y1="54" x2="99" y2="48" stroke="#2BD4BE" stroke-width="3.4" stroke-linecap="round"/>
+    <line x1="60" y1="58" x2="99" y2="63" stroke="#F7A833" stroke-width="3.4" stroke-linecap="round"/>
+    <line x1="60" y1="62" x2="99" y2="78" stroke="#E15CD2" stroke-width="3.4" stroke-linecap="round"/>
+  </svg>
+</template>
+
+<deck-stage width="1920" height="1080">
+
+  <!-- ============ 01 · TITLE ============ -->
+  <section data-label="Title">
+    <div class="slide glow">
+      <div class="anim s-eyebrow">Mantle Hackathon · 2026 cohort</div>
+
+      <div style="display:flex; align-items:center; gap:80px; margin-top:auto; margin-bottom:auto">
+        <div style="flex:1">
+          <h1 class="anim d1 s-title" style="font-size:140px">See<br/><em>before</em><br/>they do.</h1>
+          <div class="anim d2 s-sub" style="margin-top:38px; max-width:760px">On-chain intelligence &amp; execution for Mantle DeFi. Seer reads market patterns the moment they form — and lets you act in one click.</div>
+        </div>
+        <div class="anim d3 mk hero-mark" style="width:340px; height:340px; flex:none"></div>
+      </div>
+
+      <div class="s-foot">
+        <div class="brand"><span class="mk" style="width:24px;height:24px"></span><span class="wm">SEER</span></div>
+        <div>BUILT ON MANTLE</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 02 · PROBLEM ============ -->
+  <section data-label="Problem">
+    <div class="slide">
+      <div class="anim s-eyebrow">01 · <b>The problem</b></div>
+      <h2 class="anim d1 s-title" style="margin-top:30px; max-width:1280px">By the time you<br/>see it, it's already<br/><em>priced in.</em></h2>
+
+      <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:26px; margin-top:auto">
+        <div class="anim d2 scard"><div class="lede-num" style="font-size:46px; color:var(--s-risk)">~6 hrs</div><p style="margin-top:12px">Average lag between smart money moving and retail reacting. The edge is gone before the dashboard updates.</p></div>
+        <div class="anim d3 scard"><div class="lede-num" style="font-size:46px; color:var(--s-anomaly)">1,000s</div><p style="margin-top:12px">Of wallets, pools and events per minute on Mantle. No human reads them. Most tools just chart the past.</p></div>
+        <div class="anim d4 scard"><div class="lede-num" style="font-size:46px; color:var(--s-alpha)">2 jobs</div><p style="margin-top:12px">Finding the signal <em>and</em> executing it. Today they live in different tabs — by the time you bridge them, you're late.</p></div>
+      </div>
+
+      <div class="s-foot"><div class="brand"><span class="mk" style="width:24px;height:24px"></span><span class="wm">SEER</span></div><div>02 / 10</div></div>
+    </div>
+  </section>
+
+  <!-- ============ 03 · WHAT IS SEER ============ -->
+  <section data-label="What is Seer">
+    <div class="slide panel-bg">
+      <div class="anim s-eyebrow">02 · <b>What is Seer</b></div>
+      <h2 class="anim d1 s-title" style="margin-top:30px; font-size:66px; max-width:1400px">An intelligence layer that reads the chain the moment patterns form — <em>not after.</em></h2>
+      <div class="anim d2 s-sub" style="margin-top:28px">Four surfaces, one engine. Seer watches Mantle, resolves the noise, and gives you the read <b>with its evidence and a way to act.</b></div>
+
+      <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:22px; margin-top:auto">
+        <div class="anim d2 scard" style="padding:30px 26px"><span class="badge alpha">Feed</span><h4 style="font-size:24px; margin-top:18px">Signal Feed</h4><p style="font-size:16px">On-chain intelligence, explained the moment it happens.</p></div>
+        <div class="anim d3 scard" style="padding:30px 26px"><span class="badge opp">Agent</span><h4 style="font-size:24px; margin-top:18px">The Agent</h4><p style="font-size:16px">Set an intent in plain English — Seer executes it on-chain.</p></div>
+        <div class="anim d4 scard" style="padding:30px 26px"><span class="badge anomaly">Arena</span><h4 style="font-size:24px; margin-top:18px">The Arena</h4><p style="font-size:16px">Bet with Seer's predictions, or against them. Win if you're sharper.</p></div>
+        <div class="anim d5 scard" style="padding:30px 26px"><span class="badge risk">Identity</span><h4 style="font-size:24px; margin-top:18px">On-chain Identity</h4><p style="font-size:16px">A portable, provable record of what you've called right.</p></div>
+      </div>
+
+      <div class="s-foot"><div class="brand"><span class="mk" style="width:24px;height:24px"></span><span class="wm">SEER</span></div><div>03 / 10</div></div>
+    </div>
+  </section>
+
+  <!-- ============ 04 · HOW IT WORKS (PRISM) ============ -->
+  <section data-label="How it works">
+    <div class="slide glow">
+      <div class="anim s-eyebrow">03 · <b>How it works</b></div>
+      <h2 class="anim d1 s-title" style="margin-top:30px; font-size:62px">Noise in. <em>Signal</em> out.</h2>
+
+      <div style="display:flex; align-items:center; gap:60px; margin-top:auto; margin-bottom:auto">
+        <!-- raw -->
+        <div class="anim d2" style="width:300px; flex:none">
+          <div class="eyebrow" style="color:var(--ink-3)">Raw on-chain events</div>
+          <div style="font-family:var(--font-mono); font-size:14.5px; color:var(--ink-3); line-height:1.9; margin-top:16px">
+            0x5aea… swap 12.4 MNT<br/>add_liquidity AGNI #14<br/>borrow 2,000 USDY<br/>0x8c1f… stake mETH<br/>vote incentive_gauge<br/>transfer 84,200 USDC<br/>…
+          </div>
+        </div>
+
+        <!-- prism -->
+        <div class="anim d3 mk hero-mark" style="width:280px; height:280px; flex:none"></div>
+
+        <!-- spectrum key -->
+        <div class="anim d4 spectrum-key" style="flex:1; max-width:560px">
+          <div class="skey"><span class="sw" style="background:var(--s-alpha)"></span><div><div class="nm" style="color:var(--s-alpha)">Alpha</div><div class="ds">Smart-money cohorts rotating before the crowd.</div></div></div>
+          <div class="skey"><span class="sw" style="background:var(--s-opp)"></span><div><div class="nm" style="color:var(--s-opp)">Opportunity</div><div class="ds">Mispricings and yields that usually close fast.</div></div></div>
+          <div class="skey"><span class="sw" style="background:var(--s-risk)"></span><div><div class="nm" style="color:var(--s-risk)">Risk</div><div class="ds">Exposure building in your positions or a protocol.</div></div></div>
+          <div class="skey"><span class="sw" style="background:var(--s-anomaly)"></span><div><div class="nm" style="color:var(--s-anomaly)">Anomaly</div><div class="ds">Outliers that don't fit any prior pattern — yet.</div></div></div>
+        </div>
+      </div>
+
+      <div class="s-foot"><div class="brand"><span class="mk" style="width:24px;height:24px"></span><span class="wm">SEER</span></div><div>04 / 10</div></div>
+    </div>
+  </section>
+
+  <!-- ============ 05 · SIGNAL FEED ============ -->
+  <section data-label="Signal Feed">
+    <div class="slide">
+      <div style="display:flex; gap:90px; height:100%">
+        <div style="flex:1; display:flex; flex-direction:column; justify-content:center">
+          <div class="anim s-eyebrow">04 · <b>Signal Feed</b></div>
+          <h2 class="anim d1 s-title" style="margin-top:26px; font-size:70px">Every signal,<br/>with its <em>evidence.</em></h2>
+          <div class="anim d2 s-sub" style="margin-top:28px; max-width:560px">No black box. Each signal names the wallets, the protocol, the timing and a confidence score — then offers one button to mirror the move.</div>
+          <div class="anim d3" style="display:flex; gap:14px; margin-top:36px">
+            <span class="pill"><span class="dot live"></span>Live · streaming</span>
+            <span class="pill">Confidence-scored</span>
+            <span class="pill">One-click mirror</span>
+          </div>
+        </div>
+
+        <div style="width:660px; flex:none; display:flex; flex-direction:column; justify-content:center; gap:22px">
+          <div class="anim d2 scard">
+            <div class="row" style="gap:10px"><span class="badge alpha">Alpha</span><span class="pill">◇ Agni Finance</span><span class="eyebrow" style="margin-left:auto; color:var(--ink-3)">4 min ago</span></div>
+            <h4>Smart money entered Agni Pool #14</h4>
+            <p>Three top-cohort wallets opened positions in the MNT/USDC pool within nine minutes. Early rotation, not noise.</p>
+            <div class="row" style="gap:16px; margin-top:20px"><div class="cbar grow"><i style="width:86%"></i></div><span class="num" style="font-size:15px; color:var(--ink-2)">86%</span><button class="btn btn-volt">Mirror →</button></div>
+          </div>
+          <div class="anim d3 scard" style="opacity:0.92">
+            <div class="row" style="gap:10px"><span class="badge opp">Opportunity</span><span class="pill">△ INIT Capital</span><span class="eyebrow" style="margin-left:auto; color:var(--ink-3)">11 min ago</span></div>
+            <h4>INIT Capital mETH market is underpriced</h4>
+            <p>Borrow demand lags supply by 31%, holding deposit APY at 8.9% while comparable markets sit near 6%.</p>
+            <div class="row" style="gap:16px; margin-top:20px"><div class="cbar grow"><i style="width:74%"></i></div><span class="num" style="font-size:15px; color:var(--ink-2)">74%</span><button class="btn btn-ghost">Mirror →</button></div>
+          </div>
+        </div>
+      </div>
+      <div class="s-foot"><div class="brand"><span class="mk" style="width:24px;height:24px"></span><span class="wm">SEER</span></div><div>05 / 10</div></div>
+    </div>
+  </section>
+
+  <!-- ============ 06 · THE AGENT ============ -->
+  <section data-label="The Agent">
+    <div class="slide panel-bg">
+      <div style="display:flex; gap:90px; height:100%">
+        <div style="flex:1; display:flex; flex-direction:column; justify-content:center">
+          <div class="anim s-eyebrow">05 · <b>The Agent</b></div>
+          <h2 class="anim d1 s-title" style="margin-top:26px; font-size:70px">Set an intent.<br/>Seer <em>executes.</em></h2>
+          <div class="anim d2 s-sub" style="margin-top:28px; max-width:560px">Describe the outcome in plain English. The agent finds the route, manages the position, and reports back — non-custodial, on Mantle, while you sleep.</div>
+          <div class="anim d3" style="margin-top:34px; background:var(--panel); border:1px solid var(--line); border-radius:var(--r-md); padding:18px 22px; font-family:var(--font-mono); font-size:18px; max-width:560px">
+            <span style="color:var(--ink-3)">intent ▸</span> "Maximize yield on 2,000 USDY,<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;rebalance weekly, cap risk at 30."
+          </div>
+        </div>
+
+        <div style="width:620px; flex:none; display:flex; flex-direction:column; justify-content:center">
+          <div class="anim d2 scard" style="padding:30px 32px">
+            <div class="row" style="justify-content:space-between"><span class="eyebrow" style="color:var(--ink-3)">Active agent</span><span class="badge" style="color:var(--volt); border-color:var(--volt-line); background:var(--volt-wash)"><span class="dot live"></span>Running</span></div>
+            <h4 style="font-size:30px; margin-top:18px">Maximize yield · 2,000 USDY</h4>
+            <p style="font-size:18px">Weekly rebalance · risk capped at 30</p>
+            <div style="border-top:1px solid var(--line-soft); margin-top:22px; padding-top:22px; display:flex; flex-direction:column; gap:16px">
+              <div class="row" style="justify-content:space-between"><span class="mut" style="font-size:16px">Last action · 43 min ago</span><span class="num" style="font-size:16px; color:var(--s-opp)">+12.4 USDY</span></div>
+              <div class="row" style="justify-content:space-between"><span class="mut" style="font-size:16px">Deployed across</span><span class="num" style="font-size:16px">Agni · INIT · Pendle</span></div>
+              <div class="row" style="justify-content:space-between"><span class="mut" style="font-size:16px">Net APY</span><span class="num" style="font-size:16px; color:var(--volt)">14.2%</span></div>
+            </div>
+            <button class="btn btn-volt" style="width:100%; justify-content:center; margin-top:24px">New intent →</button>
+          </div>
+        </div>
+      </div>
+      <div class="s-foot"><div class="brand"><span class="mk" style="width:24px;height:24px"></span><span class="wm">SEER</span></div><div>06 / 10</div></div>
+    </div>
+  </section>
+
+  <!-- ============ 07 · THE ARENA ============ -->
+  <section data-label="The Arena">
+    <div class="slide">
+      <div style="display:flex; gap:90px; height:100%">
+        <div style="flex:1; display:flex; flex-direction:column; justify-content:center">
+          <div class="anim s-eyebrow">06 · <b>The Arena</b></div>
+          <h2 class="anim d1 s-title" style="margin-top:26px; font-size:70px">Bet <em>with</em> Seer.<br/>Or against it.</h2>
+          <div class="anim d2 s-sub" style="margin-top:28px; max-width:560px">Seer makes public, on-chain predictions and stakes its reputation on them. Agree or disagree — win if you're smarter, and learn exactly why if you're not.</div>
+          <div class="anim d3" style="display:flex; gap:38px; margin-top:40px">
+            <div class="stat"><span class="v volt">74%</span><span class="l">prediction accuracy</span></div>
+            <div class="stat"><span class="v">23</span><span class="l">resolved · 17 correct</span></div>
+          </div>
+        </div>
+
+        <div style="width:620px; flex:none; display:flex; flex-direction:column; justify-content:center">
+          <div class="anim d2 scard" style="padding:30px 32px">
+            <div class="row" style="gap:10px"><span class="badge anomaly">Seer predicts</span><span class="pill" style="color:var(--s-risk)">◔ 2d 23h left</span></div>
+            <h4 style="font-size:27px">Agni Finance TVL exceeds $55M before Jun 06</h4>
+            <p style="font-size:17px">Two incentive gauges went live this week and smart money is already rotating in. Seer reads the inflow curve as accelerating, not topping.</p>
+            <div style="margin-top:22px">
+              <div style="display:flex; height:44px; border-radius:var(--r-sm); overflow:hidden; font-family:var(--font-mono); font-size:15px; font-weight:600">
+                <div style="width:63%; background:var(--volt); color:var(--volt-ink); display:flex; align-items:center; padding:0 16px">SEER 63%</div>
+                <div style="flex:1; background:var(--panel-3); color:var(--ink-2); display:flex; align-items:center; justify-content:flex-end; padding:0 16px">YOU 37%</div>
+              </div>
+            </div>
+            <div class="row" style="gap:12px; margin-top:20px"><button class="btn btn-volt grow" style="justify-content:center">✓ Agree with Seer</button><button class="btn btn-ghost grow" style="justify-content:center">✕ Bet against</button></div>
+          </div>
+        </div>
+      </div>
+      <div class="s-foot"><div class="brand"><span class="mk" style="width:24px;height:24px"></span><span class="wm">SEER</span></div><div>07 / 10</div></div>
+    </div>
+  </section>
+
+  <!-- ============ 08 · IDENTITY ============ -->
+  <section data-label="On-chain Identity">
+    <div class="slide panel-bg">
+      <div style="display:flex; gap:90px; height:100%">
+        <div style="flex:1; display:flex; flex-direction:column; justify-content:center">
+          <div class="anim s-eyebrow">07 · <b>On-chain identity</b></div>
+          <h2 class="anim d1 s-title" style="margin-top:26px; font-size:70px">Your reputation,<br/><em>provable.</em></h2>
+          <div class="anim d2 s-sub" style="margin-top:28px; max-width:560px">Every call you make in the Arena and every move you mirror builds a portable on-chain record. Reputation you own — and can take anywhere on Mantle.</div>
+          <div class="anim d3" style="display:flex; gap:14px; margin-top:36px; flex-wrap:wrap">
+            <span class="pill">Soulbound</span><span class="pill">Composable</span><span class="pill">1,205 minted</span>
+          </div>
+        </div>
+
+        <div style="width:560px; flex:none; display:flex; flex-direction:column; justify-content:center">
+          <div class="anim d2 scard" style="padding:0; overflow:hidden">
+            <div style="padding:30px 32px; background:linear-gradient(135deg, rgba(78,155,255,0.10), rgba(225,92,210,0.08)); border-bottom:1px solid var(--line)">
+              <div class="row" style="justify-content:space-between"><span class="eyebrow" style="color:var(--ink-3)">Seer identity · #0412</span><span class="mk" style="width:34px; height:34px"></span></div>
+              <div class="row" style="gap:16px; margin-top:22px"><div style="width:62px; height:62px; border-radius:99px; background:conic-gradient(var(--s-alpha),var(--s-opp),var(--s-risk),var(--s-anomaly),var(--s-alpha))"></div><div><div style="font-family:var(--font-display); font-weight:800; font-size:26px">0x7Ae3…0B1c</div><div class="mono" style="font-size:14px; color:var(--ink-2); margin-top:3px">Rank · Oracle tier</div></div></div>
+            </div>
+            <div style="padding:26px 32px; display:grid; grid-template-columns:1fr 1fr; gap:24px 30px">
+              <div class="stat"><span class="v" style="font-size:38px; color:var(--volt)">74%</span><span class="l">call accuracy</span></div>
+              <div class="stat"><span class="v" style="font-size:38px">128</span><span class="l">signals mirrored</span></div>
+              <div class="stat"><span class="v" style="font-size:38px; color:var(--s-opp)">+$14.2k</span><span class="l">realized from calls</span></div>
+              <div class="stat"><span class="v" style="font-size:38px">#37</span><span class="l">leaderboard</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="s-foot"><div class="brand"><span class="mk" style="width:24px;height:24px"></span><span class="wm">SEER</span></div><div>08 / 10</div></div>
+    </div>
+  </section>
+
+  <!-- ============ 09 · WHY MANTLE + TRACTION ============ -->
+  <section data-label="Why Mantle">
+    <div class="slide">
+      <div class="anim s-eyebrow">08 · <b>Why Mantle</b></div>
+      <h2 class="anim d1 s-title" style="margin-top:24px; font-size:62px">Only possible <em>here.</em></h2>
+
+      <div style="display:flex; gap:80px; margin-top:38px; flex:1">
+        <div style="flex:1.1">
+          <div class="anim d2 reason" style="border-top:none"><span class="n">01</span><div><div class="h">Fees low enough to follow signal</div><div class="d">Mirroring a move and weekly agent rebalancing only make sense when execution is near-free. Mantle's costs make micro-execution viable.</div></div></div>
+          <div class="anim d3 reason"><span class="n">02</span><div><div class="h">Fast finality for live reads</div><div class="d">Signals are worthless late. Quick confirmation lets Seer act inside the window the pattern is still open.</div></div></div>
+          <div class="anim d4 reason"><span class="n">03</span><div><div class="h">A DeFi ecosystem worth reading</div><div class="d">Agni, INIT, Pendle and a growing set of protocols give Seer a rich, real surface of patterns — and somewhere to route them.</div></div></div>
+        </div>
+
+        <div class="anim d3" style="width:440px; flex:none; background:var(--panel); border:1px solid var(--line); border-radius:var(--r-lg); padding:36px 34px; display:flex; flex-direction:column; justify-content:center; gap:30px">
+          <div class="eyebrow" style="color:var(--volt)">Traction · live demo</div>
+          <div class="stat"><span class="v volt" style="font-size:60px">848</span><span class="l">signals generated</span></div>
+          <div class="stat"><span class="v" style="font-size:60px">$2.3M</span><span class="l">in agent-managed assets</span></div>
+          <div class="stat"><span class="v" style="font-size:60px">1,205</span><span class="l">identity cards minted</span></div>
+          <div class="stat"><span class="v" style="font-size:60px; color:var(--s-opp)">74%</span><span class="l">prediction accuracy</span></div>
+        </div>
+      </div>
+      <div class="s-foot"><div class="brand"><span class="mk" style="width:24px;height:24px"></span><span class="wm">SEER</span></div><div>09 / 10</div></div>
+    </div>
+  </section>
+
+  <!-- ============ 10 · CLOSE ============ -->
+  <section data-label="Close">
+    <div class="slide glow">
+      <div class="anim s-eyebrow">See before they do</div>
+
+      <div style="margin-top:auto; margin-bottom:auto">
+        <div class="anim d1 mk hero-mark" style="width:130px; height:130px; margin-bottom:44px"></div>
+        <h2 class="anim d2 s-title" style="font-size:96px">The market is<br/>talking. <em>Seer<br/>is listening.</em></h2>
+        <div class="anim d3 s-sub" style="margin-top:34px; max-width:780px">Next: open the signal engine to community models, ship the agent SDK, and take the identity layer cross-protocol. We're building the intelligence layer Mantle DeFi runs on.</div>
+        <div class="anim d4" style="display:flex; gap:16px; margin-top:42px; align-items:center">
+          <button class="btn btn-volt" style="font-size:18px; padding:15px 26px">Try the live demo →</button>
+          <span class="mono" style="font-size:16px; color:var(--ink-2)">seer.xyz · @seer_mantle</span>
+        </div>
+      </div>
+
+      <div class="s-foot"><div class="brand"><span class="mk" style="width:24px;height:24px"></span><span class="wm">SEER</span></div><div>BUILT ON MANTLE · 10 / 10</div></div>
+    </div>
+  </section>
+
+</deck-stage>
+
+<script src="deck-stage.js"></script>
+<script>
+  (function(){
+    var tpl = document.getElementById('prism').content;
+    document.querySelectorAll('.mk').forEach(function(slot){
+      slot.appendChild(tpl.cloneNode(true).querySelector('svg'));
+    });
+  })();
+</script>
+</body>
+</html>

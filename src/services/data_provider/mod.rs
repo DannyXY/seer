@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
 use serde_json::{json, Value};
 use thiserror::Error;
@@ -61,6 +61,17 @@ impl ProviderRegistry {
                     .unwrap_or_else(|| "https://api.nansen.ai/api/v1".to_string()),
                 cli_path: settings.nansen_cli_path.clone(),
                 smart_money_chains: settings.nansen_smart_money_chains.clone(),
+                token_addresses: [
+                    ("USDC", settings.mantle_usdc_address.clone()),
+                    ("USDT", settings.mantle_usdt_address.clone()),
+                    ("MNT", settings.mantle_mnt_address.clone()),
+                    ("mETH", settings.mantle_meth_address.clone()),
+                ]
+                .into_iter()
+                .filter_map(|(symbol, address)| {
+                    address.map(|address| (symbol.to_string(), address))
+                })
+                .collect(),
             });
         let defillama = settings.defillama_enabled.then(|| DefiLlamaProvider {
             client,
@@ -178,6 +189,7 @@ pub struct NansenProvider {
     base_url: String,
     cli_path: String,
     smart_money_chains: Vec<String>,
+    token_addresses: std::collections::HashMap<String, String>,
 }
 
 impl NansenProvider {
@@ -253,6 +265,118 @@ impl NansenProvider {
             )
             .await?;
         Ok(parse_smart_money_holdings(&payload))
+    }
+
+    async fn token_screener(&self) -> Result<Vec<SmartMoneyMovement>, DataProviderError> {
+        let payload = self
+            .post_json(
+                "/token-screener",
+                json!({
+                    "chains": self.smart_money_chains.clone(),
+                    "timeframe": "24h",
+                    "pagination": {
+                        "page": 1,
+                        "per_page": 25
+                    },
+                    "filters": {
+                        "only_smart_money": true
+                    },
+                    "order_by": [
+                        {
+                            "field": "netflow",
+                            "direction": "DESC"
+                        }
+                    ]
+                }),
+            )
+            .await?;
+        Ok(parse_token_screener_movements(&payload))
+    }
+
+    async fn tgm_flows(&self, token: &str) -> Result<Vec<TokenFlow>, DataProviderError> {
+        let token_address = self.token_address(token)?;
+        let to = Utc::now();
+        let from = to - ChronoDuration::days(7);
+        let payload = self
+            .post_json(
+                "/tgm/flows",
+                json!({
+                    "chain": "mantle",
+                    "token_address": token_address,
+                    "date": {
+                        "from": from.to_rfc3339(),
+                        "to": to.to_rfc3339()
+                    },
+                    "label": "smart_money",
+                    "pagination": {
+                        "page": 1,
+                        "per_page": 50
+                    },
+                    "order_by": [
+                        {
+                            "field": "date",
+                            "direction": "DESC"
+                        }
+                    ]
+                }),
+            )
+            .await?;
+        let mut flows = parse_tgm_flows(token, &payload);
+        if flows.is_empty() {
+            let holder_summary = self.tgm_holder_summary(token).await?;
+            flows.push(holder_summary);
+        }
+        Ok(flows)
+    }
+
+    async fn tgm_holder_summary(&self, token: &str) -> Result<TokenFlow, DataProviderError> {
+        let token_address = self.token_address(token)?;
+        let payload = self
+            .post_json(
+                "/tgm/holders",
+                json!({
+                    "chain": "mantle",
+                    "token_address": token_address,
+                    "aggregate_by_entity": false,
+                    "label_type": "smart_money",
+                    "pagination": {
+                        "page": 1,
+                        "per_page": 50
+                    },
+                    "filters": {
+                        "include_smart_money_labels": [
+                            "30D Smart Trader",
+                            "90D Smart Trader",
+                            "180D Smart Trader",
+                            "Fund",
+                            "Smart Trader"
+                        ]
+                    },
+                    "premium_labels": true,
+                    "order_by": [
+                        {
+                            "field": "value_usd",
+                            "direction": "DESC"
+                        }
+                    ]
+                }),
+            )
+            .await?;
+        parse_tgm_holder_summary(token, &payload).ok_or_else(|| {
+            DataProviderError::Unavailable(format!("Nansen holder rows missing for {token}"))
+        })
+    }
+
+    fn token_address(&self, token: &str) -> Result<String, DataProviderError> {
+        self.token_addresses
+            .iter()
+            .find(|(symbol, _)| symbol.eq_ignore_ascii_case(token))
+            .map(|(_, address)| address.clone())
+            .ok_or_else(|| {
+                DataProviderError::Unavailable(format!(
+                    "Nansen token endpoint requires configured Mantle address for {token}"
+                ))
+            })
     }
 }
 
@@ -384,9 +508,7 @@ impl OnchainDataProvider for NansenProvider {
     }
 
     async fn get_token_flows(&self, token: &str) -> Result<Vec<TokenFlow>, DataProviderError> {
-        Err(DataProviderError::Unavailable(format!(
-            "Nansen token flows not wired for {token}"
-        )))
+        self.tgm_flows(token).await
     }
 
     async fn get_protocol_metrics(
@@ -402,7 +524,10 @@ impl OnchainDataProvider for NansenProvider {
         &self,
         protocol: Option<&str>,
     ) -> Result<Vec<SmartMoneyMovement>, DataProviderError> {
-        let movements = self.smart_money_holdings().await?;
+        let mut movements = self.smart_money_holdings().await?;
+        if movements.is_empty() {
+            movements = self.token_screener().await?;
+        }
         if let Some(protocol) = protocol {
             let filtered: Vec<_> = movements
                 .iter()
@@ -434,6 +559,201 @@ fn parse_smart_money_holdings(payload: &Value) -> Vec<SmartMoneyMovement> {
         .into_iter()
         .filter_map(smart_money_movement_from_value)
         .collect()
+}
+
+fn parse_token_screener_movements(payload: &Value) -> Vec<SmartMoneyMovement> {
+    candidate_rows(payload)
+        .into_iter()
+        .filter_map(token_screener_movement_from_value)
+        .collect()
+}
+
+fn parse_tgm_flows(token: &str, payload: &Value) -> Vec<TokenFlow> {
+    candidate_rows(payload)
+        .into_iter()
+        .filter_map(|row| token_flow_from_tgm_flow(token, row))
+        .collect()
+}
+
+fn parse_tgm_holder_summary(token: &str, payload: &Value) -> Option<TokenFlow> {
+    let rows = candidate_rows(payload);
+    if rows.is_empty() {
+        return None;
+    }
+
+    let wallet_count = rows.len() as u32;
+    let smart_money_wallet_count = rows
+        .iter()
+        .filter(|row| {
+            first_string(
+                row,
+                &[
+                    &["address_label"],
+                    &["label"],
+                    &["smart_money_label"],
+                    &["entity_label"],
+                ],
+            )
+            .map(|label| normalize_protocol_name(&label).contains("smartmoney"))
+            .unwrap_or(false)
+        })
+        .count()
+        .max(wallet_count as usize) as u32;
+    let total_inflow = rows
+        .iter()
+        .filter_map(|row| {
+            first_f64(
+                row,
+                &[
+                    &["total_inflow_usd"],
+                    &["total_inflows_usd"],
+                    &["total_inflow"],
+                    &["inflow_usd"],
+                ],
+            )
+        })
+        .sum::<f64>();
+    let total_outflow = rows
+        .iter()
+        .filter_map(|row| {
+            first_f64(
+                row,
+                &[
+                    &["total_outflow_usd"],
+                    &["total_outflows_usd"],
+                    &["total_outflow"],
+                    &["outflow_usd"],
+                ],
+            )
+        })
+        .sum::<f64>();
+
+    Some(TokenFlow {
+        token: token.to_string(),
+        protocol: Some("Nansen Token God Mode".to_string()),
+        source_provider: "nansen".to_string(),
+        net_flow_usd: total_inflow - total_outflow,
+        wallet_count,
+        smart_money_wallet_count,
+        captured_at: Utc::now(),
+    })
+}
+
+fn token_screener_movement_from_value(value: &Value) -> Option<SmartMoneyMovement> {
+    let asset = first_string(
+        value,
+        &[
+            &["token_symbol"],
+            &["symbol"],
+            &["token", "symbol"],
+            &["token_name"],
+        ],
+    )?;
+    let protocol = first_string(value, &[&["chain"], &["network"]])
+        .unwrap_or_else(|| "Token Screener".to_string());
+    let usd_value = first_f64(
+        value,
+        &[
+            &["netflow"],
+            &["net_flow_usd"],
+            &["smart_money_netflow"],
+            &["volume"],
+            &["liquidity"],
+            &["market_cap_usd"],
+        ],
+    )
+    .unwrap_or(0.0)
+    .abs();
+    let holder_count = first_f64(
+        value,
+        &[
+            &["holders"],
+            &["holder_count"],
+            &["holders_count"],
+            &["smart_money_wallet_count"],
+        ],
+    )
+    .unwrap_or(1.0);
+
+    Some(SmartMoneyMovement {
+        wallet: "nansen-token-screener".to_string(),
+        protocol,
+        asset,
+        source_provider: "nansen".to_string(),
+        direction: "screened_smart_money_flow".to_string(),
+        usd_value,
+        confidence: smart_money_confidence(usd_value, holder_count),
+        captured_at: Utc::now(),
+    })
+}
+
+fn token_flow_from_tgm_flow(token: &str, value: &Value) -> Option<TokenFlow> {
+    let total_inflow = first_f64(
+        value,
+        &[
+            &["total_inflows_usd"],
+            &["total_inflow_usd"],
+            &["inflows_usd"],
+            &["inflow_usd"],
+            &["total_inflows"],
+        ],
+    )
+    .unwrap_or(0.0);
+    let total_outflow = first_f64(
+        value,
+        &[
+            &["total_outflows_usd"],
+            &["total_outflow_usd"],
+            &["outflows_usd"],
+            &["outflow_usd"],
+            &["total_outflows"],
+        ],
+    )
+    .unwrap_or(0.0);
+    let net_flow_usd = first_f64(
+        value,
+        &[
+            &["net_flow_usd"],
+            &["netflow_usd"],
+            &["netflow"],
+            &["net_flow"],
+        ],
+    )
+    .unwrap_or(total_inflow - total_outflow);
+    let wallet_count = first_f64(
+        value,
+        &[
+            &["holders_count"],
+            &["holder_count"],
+            &["wallet_count"],
+            &["total_holders"],
+        ],
+    )
+    .unwrap_or(0.0) as u32;
+    let smart_money_wallet_count = first_f64(
+        value,
+        &[
+            &["smart_money_wallet_count"],
+            &["smart_money_holders_count"],
+            &["holders_count"],
+            &["holder_count"],
+        ],
+    )
+    .unwrap_or(wallet_count as f64) as u32;
+
+    if net_flow_usd == 0.0 && wallet_count == 0 && smart_money_wallet_count == 0 {
+        return None;
+    }
+
+    Some(TokenFlow {
+        token: token.to_string(),
+        protocol: Some("Nansen Token God Mode".to_string()),
+        source_provider: "nansen".to_string(),
+        net_flow_usd,
+        wallet_count,
+        smart_money_wallet_count,
+        captured_at: Utc::now(),
+    })
 }
 
 fn smart_money_movement_from_value(value: &Value) -> Option<SmartMoneyMovement> {
@@ -915,7 +1235,8 @@ mod tests {
     use crate::{
         config::{AppRole, Settings},
         services::data_provider::{
-            parse_defi_holdings_positions, parse_smart_money_holdings,
+            parse_defi_holdings_positions, parse_smart_money_holdings, parse_tgm_flows,
+            parse_tgm_holder_summary, parse_token_screener_movements,
             protocol_metrics_from_defillama, risk_score_from_positions, OnchainDataProvider,
             ProviderRegistry,
         },
@@ -929,6 +1250,7 @@ mod tests {
             version: "test".to_string(),
             database_url: None,
             run_migrations: false,
+            run_internal_jobs: true,
             redis_url: None,
             claude_api_key: None,
             claude_model: "claude-sonnet-4-20250514".to_string(),
@@ -945,7 +1267,10 @@ mod tests {
             defillama_yields_base_url: "https://yields.llama.fi".to_string(),
             mantle_rpc_url: None,
             mantle_chain_id: 5003,
+            aa_provider_stack: "safe-4337-relay-kit".to_string(),
             aa_bundler_url: None,
+            aa_entry_point_address: None,
+            aa_paymaster_url: None,
             backend_signer_private_key: None,
             mantle_usdc_address: None,
             mantle_usdt_address: None,
@@ -1062,6 +1387,83 @@ mod tests {
         assert!(movements[0].confidence >= 70);
         assert_eq!(movements[1].asset, "mETH");
         assert_eq!(movements[1].usd_value, 750000.0);
+    }
+
+    #[test]
+    fn parses_nansen_token_screener_rows() {
+        let payload = json!({
+            "data": [
+                {
+                    "chain": "mantle",
+                    "token_address": "0x0000000000000000000000000000000000000001",
+                    "token_symbol": "MNT",
+                    "liquidity": 5000000.0,
+                    "netflow": 125000.0,
+                    "holders": 4200
+                }
+            ]
+        });
+
+        let movements = parse_token_screener_movements(&payload);
+
+        assert_eq!(movements.len(), 1);
+        assert_eq!(movements[0].asset, "MNT");
+        assert_eq!(movements[0].protocol, "mantle");
+        assert_eq!(movements[0].source_provider, "nansen");
+        assert_eq!(movements[0].direction, "screened_smart_money_flow");
+        assert_eq!(movements[0].usd_value, 125000.0);
+    }
+
+    #[test]
+    fn parses_nansen_tgm_flow_rows() {
+        let payload = json!({
+            "data": [
+                {
+                    "date": "2026-06-05T00:00:00Z",
+                    "holders_count": 20,
+                    "total_inflows_usd": 250000.0,
+                    "total_outflows_usd": 100000.0
+                }
+            ]
+        });
+
+        let flows = parse_tgm_flows("mETH", &payload);
+
+        assert_eq!(flows.len(), 1);
+        assert_eq!(flows[0].token, "mETH");
+        assert_eq!(flows[0].source_provider, "nansen");
+        assert_eq!(flows[0].net_flow_usd, 150000.0);
+        assert_eq!(flows[0].wallet_count, 20);
+        assert_eq!(flows[0].smart_money_wallet_count, 20);
+    }
+
+    #[test]
+    fn parses_nansen_tgm_holder_summary() {
+        let payload = json!({
+            "data": [
+                {
+                    "address": "0x0000000000000000000000000000000000000001",
+                    "address_label": "Smart Money",
+                    "total_inflow": 100000.0,
+                    "total_outflow": 25000.0,
+                    "value_usd": 50000.0
+                },
+                {
+                    "address": "0x0000000000000000000000000000000000000002",
+                    "address_label": "Fund",
+                    "total_inflow": 50000.0,
+                    "total_outflow": 10000.0
+                }
+            ]
+        });
+
+        let summary = parse_tgm_holder_summary("MNT", &payload).unwrap();
+
+        assert_eq!(summary.token, "MNT");
+        assert_eq!(summary.source_provider, "nansen");
+        assert_eq!(summary.net_flow_usd, 115000.0);
+        assert_eq!(summary.wallet_count, 2);
+        assert_eq!(summary.smart_money_wallet_count, 2);
     }
 
     #[test]

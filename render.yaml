@@ -8,6 +8,8 @@ services:
         value: production
       - key: APP_ROLE
         value: api
+      - key: RUN_INTERNAL_JOBS
+        value: false
       - key: PORT
         value: 10000
       - key: DATABASE_URL
@@ -19,6 +21,76 @@ services:
           type: redis
           name: seer-redis
           property: connectionString
+      - key: RUN_MIGRATIONS
+        value: false
+      - key: DEFILLAMA_ENABLED
+        value: true
+      - key: NANSEN_SMART_MONEY_CHAINS
+        value: ethereum,solana,base
+      - key: MANTLE_CHAIN_ID
+        value: 5003
+      - key: MANTLE_RPC_URL
+        sync: false
+      - key: AA_PROVIDER_STACK
+        value: safe-4337-relay-kit
+      - key: CLAUDE_API_KEY
+        sync: false
+      - key: NANSEN_API_KEY
+        sync: false
+      - key: AA_BUNDLER_URL
+        sync: false
+      - key: AA_ENTRY_POINT_ADDRESS
+        sync: false
+      - key: AA_PAYMASTER_URL
+        sync: false
+      - key: BACKEND_SIGNER_PRIVATE_KEY
+        sync: false
+      - key: MANTLE_USDC_ADDRESS
+        sync: false
+      - key: MANTLE_USDT_ADDRESS
+        sync: false
+      - key: MANTLE_MNT_ADDRESS
+        sync: false
+      - key: MANTLE_METH_ADDRESS
+        sync: false
+      - key: SEER_APPROVED_STRATEGY_ADDRESS
+        sync: false
+      - key: SEER_APPROVED_STRATEGY_SPENDER_ADDRESS
+        sync: false
+      - key: SEER_STRATEGY_DEPOSIT_FUNCTION
+        value: deposit(address,uint256)
+      - key: SEER_MERCHANT_MOE_STRATEGY_ADDRESS
+        sync: false
+      - key: SEER_MERCHANT_MOE_SPENDER_ADDRESS
+        sync: false
+      - key: SEER_MERCHANT_MOE_DEPOSIT_FUNCTION
+        sync: false
+      - key: SEER_LENDLE_STRATEGY_ADDRESS
+        sync: false
+      - key: SEER_LENDLE_SPENDER_ADDRESS
+        sync: false
+      - key: SEER_LENDLE_DEPOSIT_FUNCTION
+        value: deposit(address,uint256,address,uint16)
+      - key: SEER_AGNI_STRATEGY_ADDRESS
+        sync: false
+      - key: SEER_AGNI_SPENDER_ADDRESS
+        sync: false
+      - key: SEER_AGNI_DEPOSIT_FUNCTION
+        sync: false
+      - key: SEER_METH_STRATEGY_ADDRESS
+        sync: false
+      - key: SEER_METH_SPENDER_ADDRESS
+        sync: false
+      - key: SEER_METH_DEPOSIT_FUNCTION
+        sync: false
+      - key: SEER_ARENA_POINTS_ADDRESS
+        sync: false
+      - key: SEER_PREDICTION_REGISTRY_ADDRESS
+        sync: false
+      - key: SEER_IDENTITY_SBT_ADDRESS
+        sync: false
+      - key: SEER_INTENT_REGISTRY_ADDRESS
+        sync: false
 
   - type: worker
     name: seer-worker
@@ -38,6 +110,76 @@ services:
           type: redis
           name: seer-redis
           property: connectionString
+      - key: RUN_MIGRATIONS
+        value: false
+      - key: DEFILLAMA_ENABLED
+        value: true
+      - key: NANSEN_SMART_MONEY_CHAINS
+        value: ethereum,solana,base
+      - key: MANTLE_CHAIN_ID
+        value: 5003
+      - key: MANTLE_RPC_URL
+        sync: false
+      - key: AA_PROVIDER_STACK
+        value: safe-4337-relay-kit
+      - key: CLAUDE_API_KEY
+        sync: false
+      - key: NANSEN_API_KEY
+        sync: false
+      - key: AA_BUNDLER_URL
+        sync: false
+      - key: AA_ENTRY_POINT_ADDRESS
+        sync: false
+      - key: AA_PAYMASTER_URL
+        sync: false
+      - key: BACKEND_SIGNER_PRIVATE_KEY
+        sync: false
+      - key: MANTLE_USDC_ADDRESS
+        sync: false
+      - key: MANTLE_USDT_ADDRESS
+        sync: false
+      - key: MANTLE_MNT_ADDRESS
+        sync: false
+      - key: MANTLE_METH_ADDRESS
+        sync: false
+      - key: SEER_APPROVED_STRATEGY_ADDRESS
+        sync: false
+      - key: SEER_APPROVED_STRATEGY_SPENDER_ADDRESS
+        sync: false
+      - key: SEER_STRATEGY_DEPOSIT_FUNCTION
+        value: deposit(address,uint256)
+      - key: SEER_MERCHANT_MOE_STRATEGY_ADDRESS
+        sync: false
+      - key: SEER_MERCHANT_MOE_SPENDER_ADDRESS
+        sync: false
+      - key: SEER_MERCHANT_MOE_DEPOSIT_FUNCTION
+        sync: false
+      - key: SEER_LENDLE_STRATEGY_ADDRESS
+        sync: false
+      - key: SEER_LENDLE_SPENDER_ADDRESS
+        sync: false
+      - key: SEER_LENDLE_DEPOSIT_FUNCTION
+        value: deposit(address,uint256,address,uint16)
+      - key: SEER_AGNI_STRATEGY_ADDRESS
+        sync: false
+      - key: SEER_AGNI_SPENDER_ADDRESS
+        sync: false
+      - key: SEER_AGNI_DEPOSIT_FUNCTION
+        sync: false
+      - key: SEER_METH_STRATEGY_ADDRESS
+        sync: false
+      - key: SEER_METH_SPENDER_ADDRESS
+        sync: false
+      - key: SEER_METH_DEPOSIT_FUNCTION
+        sync: false
+      - key: SEER_ARENA_POINTS_ADDRESS
+        sync: false
+      - key: SEER_PREDICTION_REGISTRY_ADDRESS
+        sync: false
+      - key: SEER_IDENTITY_SBT_ADDRESS
+        sync: false
+      - key: SEER_INTENT_REGISTRY_ADDRESS
+        sync: false
 
   - type: redis
     name: seer-redis

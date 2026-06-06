@@ -5,6 +5,66 @@ use serde_json::{Map, Value};
 use crate::models::agent::ExecutionCondition;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ProtocolOperation {
+    AgniSwap {
+        token_in: String,
+        token_out: String,
+        amount_in: String,
+        fee_tier: u32,
+        amount_out_minimum: String,
+    },
+    AgniAddLiquidity {
+        token0: String,
+        token1: String,
+        fee: u32,
+        tick_lower: i32,
+        tick_upper: i32,
+        amount0_desired: String,
+        amount1_desired: String,
+        amount0_min: String,
+        amount1_min: String,
+    },
+    AgniRemoveLiquidity {
+        token_id: u64,
+        liquidity: String,
+        amount0_min: String,
+        amount1_min: String,
+    },
+    AgniCollectFees {
+        token_id: u64,
+    },
+    MerchantMoeSwap {
+        token_path: Vec<String>,
+        amount_in: String,
+        amount_out_minimum: String,
+        bin_steps: Vec<u32>,
+    },
+    MerchantMoeAddLiquidity {
+        token_x: String,
+        token_y: String,
+        bin_step: u32,
+        amount_x: String,
+        amount_y: String,
+        amount_x_min: String,
+        amount_y_min: String,
+        active_id_desired: u32,
+        id_slippage: u32,
+    },
+    MerchantMoeRemoveLiquidity {
+        token_x: String,
+        token_y: String,
+        bin_step: u32,
+        bin_ids: Vec<u64>,
+    },
+    MethStake {
+        amount_eth: String,
+    },
+    MethUnstake {
+        amount_meth: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConditionEvaluation {
     pub condition: ExecutionCondition,
     pub observed_value: Option<Value>,
@@ -25,6 +85,7 @@ pub struct ExecutionProposal {
     pub allowance_check: Option<Erc20AllowanceRequest>,
     pub transaction_draft: Option<TransactionDraft>,
     pub required_authorization: String,
+    pub protocol_operation: Option<ProtocolOperation>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,6 +147,22 @@ pub struct SendRawTransactionRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SendRawTransactionResponse {
     pub tx_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimulateTransactionRequest {
+    pub from: Option<String>,
+    pub to: String,
+    pub value: Option<String>,
+    pub data: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimulateTransactionResponse {
+    pub success: bool,
+    pub block_tag: String,
+    pub return_data: Option<String>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

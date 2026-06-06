@@ -41,11 +41,8 @@ Providers are represented behind `OnchainDataProvider`:
 
 `ProviderRegistry` is the runtime provider facade. If Nansen is configured but a method is unavailable or fails, protocol metrics fall through to `DefiLlamaProvider` before `MockProvider`. Other methods still fall back to `MockProvider`. This keeps wallet summaries, signals, identity generation, and intent condition checks available during demo or partial provider outages.
 
-Nansen `portfolio/defi-holdings` is wired for wallet positions and profile summaries. Nansen `smart-money/holdings` is wired for Signal Engine smart-money movement inputs. DeFiLlama protocol TVL and yield pool data are wired for TVL/APY condition checks. The remaining Nansen surfaces should be mapped next:
+Nansen `portfolio/defi-holdings` is wired for wallet positions and profile summaries. Nansen `smart-money/holdings` and `token-screener` are wired for Signal Engine smart-money movement inputs. Token God Mode `tgm/flows` and `tgm/holders` are wired for token-flow signals when the corresponding Mantle token address is configured. DeFiLlama protocol TVL and yield pool data are wired for TVL/APY condition checks. The remaining Nansen surface should be mapped only after its response schema is confirmed:
 
-- token holder/flow data for asset movement signals
-- token screener for emerging token discovery
-- top holders for concentration and governance risk
 - Nansen-native protocol metrics for TVL, APY, and risk conditions
 
 Signals preserve the concrete provider source from their underlying facts. Smart-money signals can report `nansen`, protocol metric signals can report `defillama`, and fallback signals report `mock`.
@@ -140,8 +137,10 @@ The demo should run without live third-party dependencies.
 
 The same Rust binary supports two roles:
 
-- `APP_ROLE=api` starts the Axum API and an internal MVP scheduler.
+- `APP_ROLE=api` starts the Axum API and can start an internal MVP scheduler.
 - `APP_ROLE=worker` starts the standalone scheduler for Render Background Worker.
+
+Set `RUN_INTERNAL_JOBS=false` on the API service when a standalone worker is running. It defaults to `true` so local `cargo run` still evaluates demo jobs without a second process.
 
 The worker runs interval loops for:
 
@@ -158,6 +157,8 @@ PostgreSQL is optional for local demo runs but active when `DATABASE_URL` is con
 - execution policy drafts and session-key policies into `agent_execution_policies`
 - agent execution logs into `agent_execution_logs`
 - intent and policy lifecycle status changes for activation, pause, cancellation, and revocation
+- generated signal snapshots into `signals`
+- fast worker tick summaries into `job_runs`
 
 Delegated execution logs include the `policy_id` of the session policy that authorized the draft, preserving the audit link between intent, policy, and proposed action.
 
@@ -194,17 +195,22 @@ smart account owner grants session key
   -> Seer evaluates active intent
   -> policy enforcement passes
   -> user-operation draft is produced
-  -> AA provider/bundler submits operation
+  -> Safe ERC-4337 provider builds/signs the complete operation
+  -> bundler submits operation
 ```
 
 This avoids broad wallet custody. Seer never gets unlimited EOA control; it can only act inside the policy the user granted and can revoke.
 
-`AA_BUNDLER_URL` enables ERC-4337 relay through:
+`AA_PROVIDER_STACK` defaults to `safe-4337-relay-kit`, matching the selected Safe ERC-4337 path. Safe's ERC-4337 support uses the Safe4337Module with an EntryPoint-compatible user-operation flow, while Safe's Relay Kit exposes the provider-side flow for creating, signing, and submitting those operations. Seer keeps this boundary non-custodial: it validates policy and relays provider-built operations, but does not hold a broad owner key.
+
+`AA_ENTRY_POINT_ADDRESS` and `AA_BUNDLER_URL` enable ERC-4337 relay through:
 
 - `eth_sendUserOperation`
 - `eth_getUserOperationReceipt`
 
-Provider-specific work remains explicit: a smart-account SDK must build/sign the user operation and apply paymaster/session-key rules before Seer relays it.
+`AA_PAYMASTER_URL` is optional and reserved for sponsored execution. Provider-specific work remains explicit: the Safe provider SDK must build/sign the user operation and apply paymaster/session-key rules before Seer relays it.
+
+`GET /api/contracts/readiness` exposes `live_validation.safe_user_operation`, which reports the selected provider stack, missing bundler/entry-point/RPC configuration, and the next submit step for a complete Safe user operation.
 
 ## Action Builder
 
@@ -251,6 +257,12 @@ Protocol-specific hardening still remains explicit. Production builders should b
 Seer can also call ERC-20 `allowance(owner, spender)` through Mantle RPC. If allowance already covers the intended spend amount, approval is skipped and the configured strategy call can be produced.
 
 For `evaluate-intent-with-allowance`, Seer derives the allowance token and spender from the parsed intent when the asset and destination protocol are configured. Caller-supplied token or spender values are rejected if they conflict with the configured destination. Manual token/spender values are only needed when the protocol is intentionally left unconfigured.
+
+Concrete drafts returned by `evaluate-intent-with-allowance` are simulated with Mantle RPC `eth_call` before the response is surfaced. If simulation fails, Seer replaces the runnable draft with a `simulation_failed` draft that omits `to` and `data`, so clients do not prompt users to sign calldata that already reverted in dry-run.
+
+`POST /api/contracts/simulate-transaction` exposes the same dry-run boundary for explicit client checks.
+
+`GET /api/contracts/readiness` also exposes `live_validation.lendle_supply`, which checks RPC chain alignment, USDC, Lendle strategy, and Lendle spender configuration before a live Lendle supply attempt.
 
 Execution proposals include `allowance_check` when Seer can derive the ERC-20 allowance target. This makes approval routing auditable before a client signs or relays anything:
 

@@ -1,10 +1,13 @@
+use chrono::{DateTime, Utc};
 use redis::Client as RedisClient;
 use serde::Serialize;
+use serde_json::Value;
 use sqlx::{postgres::PgPoolOptions, types::BigDecimal, PgPool};
 
 use crate::config::Settings;
-use crate::models::agent::{
-    AgentExecutionLog, AgentIntent, ExecutionPolicy, IntentExecutionMode, IntentStatus,
+use crate::models::{
+    agent::{AgentExecutionLog, AgentIntent, ExecutionPolicy, IntentExecutionMode, IntentStatus},
+    signals::{Signal, SignalCategory},
 };
 
 #[derive(Clone)]
@@ -19,6 +22,24 @@ pub struct InfrastructureStatus {
     pub postgres_configured: bool,
     pub redis_configured: bool,
     pub migrations_enabled: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct JobRunRecord {
+    pub job_name: String,
+    pub status: JobRunStatus,
+    pub provider: String,
+    pub summary: Value,
+    pub started_at: DateTime<Utc>,
+    pub finished_at: DateTime<Utc>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobRunStatus {
+    Success,
+    PartialFailure,
+    Failed,
 }
 
 impl Infrastructure {
@@ -203,6 +224,93 @@ pub async fn persist_agent_execution_policy(
     Ok(())
 }
 
+pub async fn persist_signals(pool: Option<&PgPool>, signals: &[Signal]) -> anyhow::Result<()> {
+    let Some(pool) = pool else {
+        return Ok(());
+    };
+
+    for signal in signals {
+        sqlx::query(
+            r#"
+            INSERT INTO signals (
+                id,
+                category,
+                headline,
+                explanation,
+                confidence_score,
+                related_wallet,
+                related_protocol,
+                related_asset,
+                source_provider,
+                source_data,
+                input_facts_hash,
+                created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, $11)
+            ON CONFLICT (id) DO UPDATE SET
+                category = EXCLUDED.category,
+                headline = EXCLUDED.headline,
+                explanation = EXCLUDED.explanation,
+                confidence_score = EXCLUDED.confidence_score,
+                related_wallet = EXCLUDED.related_wallet,
+                related_protocol = EXCLUDED.related_protocol,
+                related_asset = EXCLUDED.related_asset,
+                source_provider = EXCLUDED.source_provider,
+                source_data = EXCLUDED.source_data,
+                input_facts_hash = EXCLUDED.input_facts_hash,
+                created_at = EXCLUDED.created_at
+            "#,
+        )
+        .bind(signal.id)
+        .bind(signal_category_label(&signal.category))
+        .bind(&signal.headline)
+        .bind(&signal.explanation)
+        .bind(i32::from(signal.confidence_score))
+        .bind(&signal.related_wallet)
+        .bind(&signal.related_protocol)
+        .bind(&signal.related_asset)
+        .bind(&signal.source_provider)
+        .bind(&signal.source_data)
+        .bind(signal.created_at)
+        .execute(pool)
+        .await?;
+    }
+
+    Ok(())
+}
+
+pub async fn persist_job_run(pool: Option<&PgPool>, record: &JobRunRecord) -> anyhow::Result<()> {
+    let Some(pool) = pool else {
+        return Ok(());
+    };
+
+    sqlx::query(
+        r#"
+        INSERT INTO job_runs (
+            job_name,
+            status,
+            provider,
+            summary,
+            started_at,
+            finished_at,
+            error
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        "#,
+    )
+    .bind(&record.job_name)
+    .bind(job_run_status_label(record.status))
+    .bind(&record.provider)
+    .bind(&record.summary)
+    .bind(record.started_at)
+    .bind(record.finished_at)
+    .bind(&record.error)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
 fn intent_status_label(status: &IntentStatus) -> &'static str {
     match status {
         IntentStatus::Draft => "DRAFT",
@@ -222,17 +330,39 @@ fn execution_mode_label(mode: &IntentExecutionMode) -> &'static str {
     }
 }
 
+fn signal_category_label(category: &SignalCategory) -> &'static str {
+    match category {
+        SignalCategory::Alpha => "ALPHA",
+        SignalCategory::Anomaly => "ANOMALY",
+        SignalCategory::Risk => "RISK",
+        SignalCategory::Opportunity => "OPPORTUNITY",
+    }
+}
+
+fn job_run_status_label(status: JobRunStatus) -> &'static str {
+    match status {
+        JobRunStatus::Success => "SUCCESS",
+        JobRunStatus::PartialFailure => "PARTIAL_FAILURE",
+        JobRunStatus::Failed => "FAILED",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
         config::{AppRole, Settings},
         db::{
-            execution_mode_label, intent_status_label, persist_agent_execution_log,
-            persist_agent_execution_policy, persist_agent_intent, Infrastructure,
+            execution_mode_label, intent_status_label, job_run_status_label,
+            persist_agent_execution_log, persist_agent_execution_policy, persist_agent_intent,
+            persist_job_run, persist_signals, signal_category_label, Infrastructure, JobRunRecord,
+            JobRunStatus,
         },
         models::agent::{CreateIntentRequest, IntentExecutionMode, IntentStatus},
-        services::agent::AgentService,
+        models::signals::SignalCategory,
+        services::{agent::AgentService, data_provider::MockProvider, signal_engine::SignalEngine},
     };
+    use chrono::Utc;
+    use serde_json::json;
 
     #[tokio::test]
     async fn persistence_helpers_noop_without_postgres() {
@@ -253,12 +383,28 @@ mod tests {
             allowance_check: None,
             transaction_draft: None,
             required_authorization: "user-signed transaction".to_string(),
+            protocol_operation: None,
         };
         let log = service.record_execution_log(&intent, proposal);
         persist_agent_execution_log(None, &log).await.unwrap();
 
         let policy = service.create_policy(&intent);
         persist_agent_execution_policy(None, &policy).await.unwrap();
+
+        let signals = SignalEngine::new().generate(&MockProvider).await.unwrap();
+        persist_signals(None, &signals).await.unwrap();
+
+        let now = Utc::now();
+        let job = JobRunRecord {
+            job_name: "test_job".to_string(),
+            status: JobRunStatus::Success,
+            provider: "mock".to_string(),
+            summary: json!({ "ok": true }),
+            started_at: now,
+            finished_at: now,
+            error: None,
+        };
+        persist_job_run(None, &job).await.unwrap();
     }
 
     #[test]
@@ -284,6 +430,19 @@ mod tests {
             execution_mode_label(&IntentExecutionMode::RecurringConditional),
             "RECURRING_CONDITIONAL"
         );
+        assert_eq!(signal_category_label(&SignalCategory::Alpha), "ALPHA");
+        assert_eq!(signal_category_label(&SignalCategory::Anomaly), "ANOMALY");
+        assert_eq!(signal_category_label(&SignalCategory::Risk), "RISK");
+        assert_eq!(
+            signal_category_label(&SignalCategory::Opportunity),
+            "OPPORTUNITY"
+        );
+        assert_eq!(job_run_status_label(JobRunStatus::Success), "SUCCESS");
+        assert_eq!(
+            job_run_status_label(JobRunStatus::PartialFailure),
+            "PARTIAL_FAILURE"
+        );
+        assert_eq!(job_run_status_label(JobRunStatus::Failed), "FAILED");
     }
 
     #[tokio::test]
@@ -307,6 +466,7 @@ mod tests {
             version: "test".to_string(),
             database_url: None,
             run_migrations: true,
+            run_internal_jobs: true,
             redis_url: None,
             claude_api_key: None,
             claude_model: "claude-sonnet-4-20250514".to_string(),
@@ -323,7 +483,10 @@ mod tests {
             defillama_yields_base_url: "https://yields.llama.fi".to_string(),
             mantle_rpc_url: None,
             mantle_chain_id: 5003,
+            aa_provider_stack: "safe-4337-relay-kit".to_string(),
             aa_bundler_url: None,
+            aa_entry_point_address: None,
+            aa_paymaster_url: None,
             backend_signer_private_key: None,
             mantle_usdc_address: None,
             mantle_usdt_address: None,

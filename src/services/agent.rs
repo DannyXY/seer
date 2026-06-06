@@ -363,7 +363,19 @@ fn infer_conditions(normalized: &str) -> Vec<ExecutionCondition> {
 }
 
 fn infer_action(normalized: &str) -> String {
-    if normalized.contains("buy") || normalized.contains("accumulate") {
+    if normalized.contains("swap") || normalized.contains("exchange") {
+        "swap".to_string()
+    } else if normalized.contains("add liquidity") || normalized.contains("provide liquidity") {
+        "addLiquidity".to_string()
+    } else if normalized.contains("remove liquidity") || normalized.contains("exit liquidity") {
+        "removeLiquidity".to_string()
+    } else if normalized.contains("collect fee") || normalized.contains("claim fee") {
+        "collectFees".to_string()
+    } else if normalized.contains("stake") {
+        "stake".to_string()
+    } else if normalized.contains("unstake") || normalized.contains("redeem") {
+        "unstake".to_string()
+    } else if normalized.contains("buy") || normalized.contains("accumulate") {
         "accumulate".to_string()
     } else if normalized.contains("sell") || normalized.contains("exit") {
         "reduce_exposure".to_string()
@@ -375,7 +387,7 @@ fn infer_action(normalized: &str) -> String {
 }
 
 fn infer_assets(normalized: &str) -> Vec<String> {
-    ["mETH", "MNT", "USDT", "USDC"]
+    ["mETH", "MNT", "USDT", "USDC", "USDY", "WMNT", "WETH", "cmETH"]
         .iter()
         .filter(|asset| normalized.contains(&asset.to_lowercase()))
         .map(|asset| asset.to_string())
@@ -388,15 +400,20 @@ fn infer_spend_amount(normalized: &str) -> Option<SpendAmount> {
         let Some(amount) = parse_number_token(window[0]) else {
             continue;
         };
-        let Some(asset) = ["meth", "mnt", "usdt", "usdc"]
+        let Some(asset) = ["meth", "mnt", "usdt", "usdc", "usdy", "wmnt", "weth", "cmeth"]
             .iter()
             .find(|asset| window[1].eq_ignore_ascii_case(asset))
         else {
             continue;
         };
+        let normalized_asset = asset.to_uppercase()
+            .replace("METH", "mETH")
+            .replace("CMETH", "cmETH")
+            .replace("WMNT", "WMNT")
+            .replace("WETH", "WETH");
         return Some(SpendAmount {
             amount,
-            asset: asset.to_uppercase().replace("METH", "mETH"),
+            asset: normalized_asset,
         });
     }
     None
@@ -413,29 +430,34 @@ fn infer_protocols(normalized: &str) -> Vec<String> {
     {
         protocols.push("Merchant Moe".to_string());
     }
-    if normalized.contains("lendle") {
-        protocols.push("Lendle".to_string());
+    if normalized.contains("fluxion") {
+        protocols.push("Fluxion Network".to_string());
     }
-    if normalized.contains("meth") {
+    if normalized.contains("ondo") || normalized.contains("usdy") {
+        protocols.push("Ondo USDY".to_string());
+    }
+    if normalized.contains("meth") && !normalized.contains("method") {
         protocols.push("mETH Protocol".to_string());
     }
     protocols
 }
 
 fn infer_subject(normalized: &str) -> String {
-    if normalized.contains("meth") {
+    if normalized.contains("meth") && !normalized.contains("method") {
         "mETH".to_string()
-    } else if normalized.contains("lendle") {
-        "Lendle".to_string()
     } else if normalized.contains("merchant moe")
         || normalized.contains("merchantmoe")
         || normalized.contains("moe")
     {
         "Merchant Moe".to_string()
-    } else if normalized.contains("mnt") {
-        "MNT".to_string()
     } else if normalized.contains("agni") {
         "Agni Finance".to_string()
+    } else if normalized.contains("fluxion") {
+        "Fluxion Network".to_string()
+    } else if normalized.contains("ondo") || normalized.contains("usdy") {
+        "Ondo USDY".to_string()
+    } else if normalized.contains("mnt") {
+        "MNT".to_string()
     } else {
         "portfolio_or_protocol".to_string()
     }
@@ -739,6 +761,7 @@ mod tests {
             allowance_check: None,
             transaction_draft: None,
             required_authorization: "user-signed transaction".to_string(),
+            protocol_operation: None,
         };
 
         let log = service.record_execution_log(&active, proposal);
@@ -765,6 +788,7 @@ mod tests {
             allowance_check: None,
             transaction_draft: None,
             required_authorization: "session policy".to_string(),
+            protocol_operation: None,
         };
 
         let log = service.record_execution_log_with_policy(&intent, Some(policy.id), proposal);

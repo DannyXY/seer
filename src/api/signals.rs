@@ -5,7 +5,7 @@ use axum::{
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::{errors::ApiError, AppState};
+use crate::{db::persist_signals, errors::ApiError, AppState};
 
 pub async fn list(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
     let provider = state.services.provider.provider().await;
@@ -23,6 +23,10 @@ pub async fn list(State(state): State<AppState>) -> Result<Json<Value>, ApiError
             .explain_signal(signal)
             .await
             .map_err(|err| ApiError::Service(err.to_string()))?;
+    }
+
+    if let Err(err) = persist_signals(state.services.infra.postgres.as_ref(), &signals).await {
+        tracing::warn!(error = %err, "failed to persist generated signal snapshots");
     }
 
     Ok(Json(json!({ "signals": signals })))

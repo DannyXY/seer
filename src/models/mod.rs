@@ -3,6 +3,8 @@ pub mod arena;
 pub mod auth;
 pub mod execution;
 pub mod identity;
+pub mod lp_position;
 pub mod provider;
+pub mod settings;
 pub mod signals;
 pub mod wallet;

@@ -11,7 +11,32 @@ use crate::{
 };
 
 pub async fn predictions(State(state): State<AppState>) -> Json<Value> {
-    Json(json!({ "predictions": state.services.arena.predictions() }))
+    let predictions = state
+        .services
+        .arena
+        .predictions()
+        .into_iter()
+        .map(|prediction| {
+            json!({
+                "claim": prediction.claim,
+                "comparison_operator": prediction.comparison_operator,
+                "created_at": prediction.created_at,
+                "expiry_time": prediction.expiry_time,
+                "final_value": prediction.final_value,
+                "id": prediction.id,
+                "metric": prediction.metric,
+                "onchain_prediction_id": prediction.onchain_prediction_id,
+                "pool_points": state.services.arena.prediction_pool(prediction.id),
+                "reasoning": prediction.reasoning,
+                "result": prediction.result,
+                "seer_confidence": prediction.seer_confidence,
+                "seer_position": prediction.seer_position,
+                "status": prediction.status,
+                "target_value": prediction.target_value
+            })
+        })
+        .collect::<Vec<_>>();
+    Json(json!({ "predictions": predictions }))
 }
 
 pub async fn prediction(
@@ -38,9 +63,11 @@ pub async fn enter(
         .arena
         .enter_prediction(id, entry)
         .map_err(|err| ApiError::BadRequest(err.to_string()))?;
+    let user_points = state.services.arena.user_points(&entry.wallet_address);
     Ok(Json(json!({
         "prediction_id": id,
         "entry": entry,
+        "user_points": user_points,
         "status": "active",
         "contract_configured": state.services.contracts.is_configured()
     })))
@@ -54,7 +81,8 @@ pub async fn entries(
     require_wallet(&state, &headers, &address)?;
     Ok(Json(json!({
         "wallet_address": address,
-        "entries": state.services.arena.entries_for_wallet(&address)
+        "entries": state.services.arena.entries_for_wallet(&address),
+        "user_points": state.services.arena.user_points(&address)
     })))
 }
 

@@ -1,0 +1,191 @@
+/* ============================================================
+   SEER — Brand System  ·  "Instrument"
+   Graphite quant terminal · voltage lime · refraction spectrum.
+   Canonical tokens. Shared by the design-system page and the deck.
+   ============================================================ */
+
+:root {
+  /* ---- Surfaces (graphite, dark-first) ---- */
+  --graphite:   #0A0B0D;   /* deepest — app / page bg */
+  --panel:      #131519;   /* card surface */
+  --panel-2:    #1A1D22;   /* nested / inset surface */
+  --panel-3:    #212429;   /* raised chip / track */
+  --line:       #262A31;   /* hairline border */
+  --line-soft:  #1B1E23;   /* faint divider */
+
+  /* ---- Ink ---- */
+  --ink:    #EDEFF2;       /* primary text */
+  --ink-2:  #8B919B;       /* secondary text */
+  --ink-3:  #5A606A;       /* faint / placeholder */
+
+  /* ---- Voltage — Seer's signature. Brand, action, "live". ----
+     Sits OUTSIDE the signal spectrum on purpose: it is the
+     instrument, never a reading. ---- */
+  --volt:       #C8F230;                  /* oklch(0.91 0.20 124) */
+  --volt-deep:  #A6CE1E;                  /* pressed / hover-dark */
+  --volt-ink:   #0C0E08;                  /* text on voltage */
+  --volt-wash:  rgba(200,242,48,0.13);
+  --volt-line:  rgba(200,242,48,0.34);
+  --volt-glow:  0 0 0 1px rgba(200,242,48,.30), 0 0 22px rgba(200,242,48,.22);
+
+  /* ---- Signal spectrum — the taxonomy the prism emits. ----
+     Blue → teal → amber → magenta. Green is deliberately absent
+     (reserved for voltage). All tuned to ~L0.74 on graphite. ---- */
+  --s-alpha:        #4E9BFF;   /* ALPHA       — azure   */
+  --s-alpha-wash:   rgba(78,155,255,0.14);
+  --s-opp:          #2BD4BE;   /* OPPORTUNITY — teal    */
+  --s-opp-wash:     rgba(43,212,190,0.13);
+  --s-risk:         #F7A833;   /* RISK        — amber   */
+  --s-risk-wash:    rgba(247,168,51,0.14);
+  --s-anomaly:      #E15CD2;   /* ANOMALY     — magenta */
+  --s-anomaly-wash: rgba(225,92,210,0.14);
+
+  /* ---- Gauge / status states ---- */
+  --safe:   #2BD4BE;
+  --warn:   #F7A833;
+  --danger: #FF5C5C;
+
+  /* ---- Shadows (dark; depth via black, life via glow) ---- */
+  --sh-1: 0 1px 2px rgba(0,0,0,0.4);
+  --sh-2: 0 6px 22px rgba(0,0,0,0.46);
+  --sh-3: 0 18px 50px rgba(0,0,0,0.55);
+  --sh-pop: 0 24px 64px rgba(0,0,0,0.6);
+
+  /* ---- Type ---- */
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;  /* 800–900, tight, UPPER */
+  --font-ui:      "Archivo", "Helvetica Neue", Arial, sans-serif;  /* 400–600 body / UI */
+  --font-mono:    "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  /* ---- Geometry (crisp, instrument-like) ---- */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 9px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+  --pad-card: 22px;
+
+  /* ---- Motion ---- */
+  --ease:     cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion: 1;
+}
+
+/* ============================================================
+   Base
+   ============================================================ */
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--font-ui);
+  background: var(--graphite);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-size: 15px;
+  line-height: 1.5;
+}
+::selection { background: var(--volt); color: var(--volt-ink); }
+button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+a { color: inherit; text-decoration: none; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #2b2f36; border-radius: 8px; border: 3px solid var(--graphite); }
+::-webkit-scrollbar-thumb:hover { background: #3a3f47; }
+
+/* ============================================================
+   Type helpers
+   ============================================================ */
+.display {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 0.94;
+  text-transform: uppercase;
+}
+.mono { font-family: var(--font-mono); }
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.num { font-family: var(--font-mono); font-feature-settings: "tnum" 1; letter-spacing: -0.01em; }
+.mut { color: var(--ink-2); }
+.faint { color: var(--ink-3); }
+
+/* ============================================================
+   Buttons
+   ============================================================ */
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono); font-size: 12.5px; font-weight: 500;
+  letter-spacing: 0.04em;
+  padding: 10px 16px; border-radius: var(--r-sm);
+  transition: transform .14s var(--ease), background .18s var(--ease), box-shadow .2s var(--ease), border-color .18s var(--ease);
+  white-space: nowrap; user-select: none;
+}
+.btn:active { transform: translateY(1px); }
+.btn-volt { background: var(--volt); color: var(--volt-ink); font-weight: 600; }
+.btn-volt:hover { background: var(--volt-deep); box-shadow: var(--volt-glow); }
+.btn-ghost { background: var(--panel-2); color: var(--ink); border: 1px solid var(--line); }
+.btn-ghost:hover { border-color: #383d45; background: var(--panel-3); }
+.btn-quiet { color: var(--ink-2); padding: 8px 10px; }
+.btn-quiet:hover { color: var(--ink); background: rgba(255,255,255,0.05); }
+.btn:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; }
+
+/* ============================================================
+   Cards
+   ============================================================ */
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+}
+
+/* ============================================================
+   Badges / pills
+   ============================================================ */
+.badge {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  padding: 4px 8px; border-radius: var(--r-xs);
+  border: 1px solid transparent;
+}
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 11px; padding: 4px 10px; border-radius: 99px;
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--ink-2);
+}
+
+/* signal-coded badge variants */
+.badge.alpha   { color: var(--s-alpha);   border-color: var(--s-alpha);   background: var(--s-alpha-wash); }
+.badge.opp     { color: var(--s-opp);     border-color: var(--s-opp);     background: var(--s-opp-wash); }
+.badge.risk    { color: var(--s-risk);    border-color: var(--s-risk);    background: var(--s-risk-wash); }
+.badge.anomaly { color: var(--s-anomaly); border-color: var(--s-anomaly); background: var(--s-anomaly-wash); }
+
+/* ---- live dot ---- */
+.dot { width: 7px; height: 7px; border-radius: 99px; background: var(--volt); position: relative; }
+.dot.live::after {
+  content: ""; position: absolute; inset: -4px; border-radius: 99px;
+  border: 1.5px solid var(--volt);
+  animation: ping calc(2.4s / var(--motion)) var(--ease-out) infinite;
+}
+@keyframes ping { 0% { transform: scale(0.6); opacity: 0.8; } 100% { transform: scale(2.2); opacity: 0; } }
+
+/* ---- confidence bar ---- */
+.cbar { height: 6px; border-radius: 99px; background: var(--panel-3); overflow: hidden; }
+.cbar > i { display: block; height: 100%; border-radius: 99px; background: var(--volt); }
+
+/* ============================================================
+   Utility
+   ============================================================ */
+.row { display: flex; align-items: center; }
+.col { display: flex; flex-direction: column; }
+.center { display: flex; align-items: center; justify-content: center; }
+.grow { flex: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.05ms !important; }
+}
