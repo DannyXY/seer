@@ -7,7 +7,6 @@ use sqlx::{postgres::PgPoolOptions, types::BigDecimal, PgPool};
 use crate::config::Settings;
 use crate::models::{
     agent::{AgentExecutionLog, AgentIntent, ExecutionPolicy, IntentExecutionMode, IntentStatus},
-    lp_position::LpPosition,
     signals::{Signal, SignalCategory},
 };
 
