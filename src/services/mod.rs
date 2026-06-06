@@ -1,3 +1,4 @@
+pub mod abi_encoder;
 pub mod agent;
 pub mod arena;
 pub mod auth;
@@ -6,6 +7,7 @@ pub mod contracts;
 pub mod data_provider;
 pub mod execution;
 pub mod identity;
+pub mod quoter;
 pub mod settings;
 pub mod signal_engine;
 pub mod wallet;
