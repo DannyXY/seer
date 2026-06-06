@@ -37,19 +37,16 @@ frontend/
 
 ## Setup
 
-```bash
-# Install dependencies
-npm install
+### Start Frontend Server
 
-# Start development server
-npm run dev
+```python
+# Run the development server (serves on port 8088)
+python3 serve.py
 
-# Build for production
-npm run build
-
-# Preview production build
-npm run preview
+# Frontend will be available at http://localhost:8088/
 ```
+
+The `serve.py` script serves the frontend as a single-page application (SPA) from the `public/` directory. All routes that don't match a static file will serve `public/index.html`.
 
 ## Features
 
