@@ -406,9 +406,43 @@ impl ExecutionService {
     fn build_transaction_draft(
         &self,
         parsed: &ParsedIntent,
-        _wallet_address: &str,
+        wallet_address: &str,
     ) -> Option<TransactionDraft> {
         match parsed.action.as_str() {
+            "swap" => self.build_swap_draft(parsed, wallet_address),
+            "addLiquidity" => Some(TransactionDraft {
+                kind: "add_liquidity".to_string(),
+                to: None,
+                value: "0".to_string(),
+                data: None,
+                chain_id: self.chain_id,
+                human_summary: "Add liquidity to protocol pool. Requires quote from protocol quoter (QuoterV2 for Agni, LBQuoter for Merchant Moe).".to_string(),
+            }),
+            "removeLiquidity" => Some(TransactionDraft {
+                kind: "remove_liquidity".to_string(),
+                to: None,
+                value: "0".to_string(),
+                data: None,
+                chain_id: self.chain_id,
+                human_summary: "Remove liquidity from position. Requires position ID (Agni tokenId or Merchant Moe binIds).".to_string(),
+            }),
+            "collectFees" => Some(TransactionDraft {
+                kind: "collect_fees".to_string(),
+                to: None,
+                value: "0".to_string(),
+                data: None,
+                chain_id: self.chain_id,
+                human_summary: "Collect accrued fees from LP position.".to_string(),
+            }),
+            "stake" => self.build_stake_draft(parsed),
+            "unstake" => Some(TransactionDraft {
+                kind: "unstake".to_string(),
+                to: None,
+                value: "0".to_string(),
+                data: None,
+                chain_id: self.chain_id,
+                human_summary: "Unstake from mETH Protocol or withdraw from Ondo USDY.".to_string(),
+            }),
             "accumulate" => self
                 .build_approval_draft(parsed)
                 .or_else(|| Some(TransactionDraft {
@@ -431,6 +465,44 @@ impl ExecutionService {
             }),
             _ => None,
         }
+    }
+
+    fn build_swap_draft(&self, parsed: &ParsedIntent, wallet_address: &str) -> Option<TransactionDraft> {
+        let assets = &parsed.target_assets;
+        if assets.len() < 2 {
+            return None;
+        }
+        let token_in = assets[0].as_str();
+        let token_out = assets[1].as_str();
+
+        Some(TransactionDraft {
+            kind: "swap".to_string(),
+            to: None,
+            value: "0".to_string(),
+            data: None,
+            chain_id: self.chain_id,
+            human_summary: format!(
+                "Swap {} for {} via {}. Call QuoterV2/LBQuoter first to get amountOut and slippage-adjusted minimum.",
+                token_in, token_out,
+                parsed.target_protocols.first().map(|p| p.as_str()).unwrap_or("best protocol")
+            ),
+        })
+    }
+
+    fn build_stake_draft(&self, parsed: &ParsedIntent) -> Option<TransactionDraft> {
+        let spend = parsed.spend_amount.as_ref()?;
+        Some(TransactionDraft {
+            kind: "stake".to_string(),
+            to: None,
+            value: "0".to_string(),
+            data: None,
+            chain_id: self.chain_id,
+            human_summary: format!(
+                "Stake {} {} into {}",
+                spend.amount, spend.asset,
+                parsed.target_protocols.first().map(|p| p.as_str()).unwrap_or("protocol")
+            ),
+        })
     }
 
     fn build_approval_draft(&self, parsed: &ParsedIntent) -> Option<TransactionDraft> {

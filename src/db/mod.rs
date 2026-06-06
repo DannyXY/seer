@@ -7,6 +7,7 @@ use sqlx::{postgres::PgPoolOptions, types::BigDecimal, PgPool};
 use crate::config::Settings;
 use crate::models::{
     agent::{AgentExecutionLog, AgentIntent, ExecutionPolicy, IntentExecutionMode, IntentStatus},
+    lp_position::LpPosition,
     signals::{Signal, SignalCategory},
 };
 
@@ -345,6 +346,135 @@ fn job_run_status_label(status: JobRunStatus) -> &'static str {
         JobRunStatus::PartialFailure => "PARTIAL_FAILURE",
         JobRunStatus::Failed => "FAILED",
     }
+}
+
+pub async fn persist_lp_position(
+    pool: Option<&PgPool>,
+    position: &crate::models::lp_position::LpPosition,
+) -> anyhow::Result<()> {
+    let Some(pool) = pool else {
+        tracing::debug!("skipping lp_position persistence: no postgres configured");
+        return Ok(());
+    };
+
+    let protocol_str = match position.protocol {
+        crate::models::lp_position::ProtocolType::AgniFinance => "AgniFinance",
+        crate::models::lp_position::ProtocolType::MerchantMoe => "MerchantMoe",
+    };
+
+    let (agni_token_id, agni_token0, agni_token1, agni_fee, agni_tick_lower, agni_tick_upper, agni_liquidity) =
+        if let Some(agni_pos) = &position.agni_position {
+            (
+                Some(agni_pos.token_id as i64),
+                Some(agni_pos.token0.clone()),
+                Some(agni_pos.token1.clone()),
+                Some(agni_pos.fee as i32),
+                Some(agni_pos.tick_lower as i32),
+                Some(agni_pos.tick_upper as i32),
+                Some(agni_pos.liquidity.clone()),
+            )
+        } else {
+            (None, None, None, None, None, None, None)
+        };
+
+    let (moe_lb_pair, moe_token_x, moe_token_y, moe_bin_step, moe_bin_ids, moe_liquidity_minted) =
+        if let Some(moe_pos) = &position.moe_position {
+            (
+                Some(moe_pos.lb_pair.clone()),
+                Some(moe_pos.token_x.clone()),
+                Some(moe_pos.token_y.clone()),
+                Some(moe_pos.bin_step as i32),
+                Some(
+                    moe_pos
+                        .bin_ids
+                        .iter()
+                        .map(|id| *id as i64)
+                        .collect::<Vec<_>>(),
+                ),
+                Some(moe_pos.liquidity_minted.clone()),
+            )
+        } else {
+            (None, None, None, None, None, None)
+        };
+
+    sqlx::query(
+        r#"
+        INSERT INTO lp_positions (
+            id, wallet_address, protocol,
+            agni_token_id, agni_token0, agni_token1, agni_fee, agni_tick_lower, agni_tick_upper, agni_liquidity,
+            moe_lb_pair, moe_token_x, moe_token_y, moe_bin_step, moe_bin_ids, moe_liquidity_minted,
+            amount_x_added, amount_y_added, intent_hash, tx_hash, created_at, updated_at
+        ) VALUES (
+            $1, $2, $3,
+            $4, $5, $6, $7, $8, $9, $10,
+            $11, $12, $13, $14, $15, $16,
+            $17, $18, $19, $20, $21, $22
+        )
+        "#,
+    )
+    .bind(position.id.to_string())
+    .bind(&position.wallet_address)
+    .bind(protocol_str)
+    .bind(agni_token_id)
+    .bind(agni_token0)
+    .bind(agni_token1)
+    .bind(agni_fee)
+    .bind(agni_tick_lower)
+    .bind(agni_tick_upper)
+    .bind(agni_liquidity)
+    .bind(moe_lb_pair)
+    .bind(moe_token_x)
+    .bind(moe_token_y)
+    .bind(moe_bin_step)
+    .bind(moe_bin_ids)
+    .bind(moe_liquidity_minted)
+    .bind(&position.amount_x_added)
+    .bind(&position.amount_y_added)
+    .bind(&position.intent_hash)
+    .bind(&position.tx_hash)
+    .bind(position.created_at)
+    .bind(position.updated_at)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn get_lp_positions(
+    pool: Option<&PgPool>,
+    wallet_address: &str,
+) -> anyhow::Result<Vec<crate::models::lp_position::LpPosition>> {
+    let Some(pool) = pool else {
+        tracing::debug!("no postgres configured for lp_positions query");
+        return Ok(Vec::new());
+    };
+
+    let rows = sqlx::query_as::<_, (String, String)>(
+        "SELECT id, protocol FROM lp_positions WHERE wallet_address = $1 ORDER BY created_at DESC",
+    )
+    .bind(wallet_address)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows.iter().map(|(id, protocol)| {
+        crate::models::lp_position::LpPosition {
+            id: uuid::Uuid::parse_str(id).unwrap_or_else(|_| uuid::Uuid::new_v4()),
+            wallet_address: wallet_address.to_string(),
+            protocol: if protocol == "AgniFinance" {
+                crate::models::lp_position::ProtocolType::AgniFinance
+            } else {
+                crate::models::lp_position::ProtocolType::MerchantMoe
+            },
+            agni_position: None,
+            moe_position: None,
+            amount_x_added: String::new(),
+            amount_y_added: String::new(),
+            intent_hash: None,
+            tx_hash: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }).collect())
 }
 
 #[cfg(test)]
