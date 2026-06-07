@@ -11,7 +11,7 @@ const NAV = [
   { id: "settings", label: "Settings", icon: "settings" },
 ];
 
-export function Sidebar({ route, setRoute, onDisconnect, badge, collapsed, onToggle }) {
+function Sidebar({ route, setRoute, onDisconnect, badge, collapsed, onToggle }) {
   const seer = window.useSeerStore();
   const walletLabel = window.SEER.util.shortAddr(seer.wallet);
   return (
