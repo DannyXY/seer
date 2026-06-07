@@ -1,7 +1,7 @@
 import { createSmartAccountClient, ENTRYPOINT_ADDRESS_V07 } from 'permissionless';
 import { createPimlicoPaymasterClient } from 'permissionless/clients/pimlico';
 import { createPimlicoClient } from 'permissionless/clients/pimlico';
-import { http, Chain } from 'viem';
+import { http } from 'viem';
 
 const PIMLICO_API_KEY = import.meta.env.VITE_PIMLICO_API_KEY;
 

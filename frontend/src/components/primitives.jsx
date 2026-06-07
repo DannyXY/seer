@@ -1,7 +1,7 @@
 /* ============================================================
    SEER — shared primitives
    ============================================================ */
-const { useState, useEffect, useRef, useMemo, useCallback } = React;
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 
 /* ---------- Icons (simple line glyphs) ---------- */
 function Icon({ name, size = 18, stroke = 1.6, style }) {

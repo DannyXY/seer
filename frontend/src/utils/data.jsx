@@ -3,7 +3,8 @@
    Keeps the approved window.SEER shapes while sourcing data from
    the Rust API. No mock banks, no random simulation.
    ============================================================ */
-(function () {
+
+{
   const API_BASE = localStorage.getItem("seerApiBase") || window.SEER_API_BASE || (
     window.location.protocol === "http:" && window.location.port === "10000" ? "" : "http://localhost:10000"
   );
@@ -570,6 +571,7 @@
     update,
   };
   window.useSeerStore = function useSeerStore() {
+    const React = window.React;
     return React.useSyncExternalStore(window.SEER.subscribe, window.SEER.getSnapshot, window.SEER.getSnapshot);
   };
-})();
+}
