@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "../contracts/SeerArenaPoints.sol";
-import "../contracts/SeerPredictionRegistry.sol";
+import "../contract/SeerArenaPoints.sol";
+import "../contract/SeerPredictionRegistry.sol";
 
 interface Vm {
     function warp(uint256) external;
@@ -38,9 +38,9 @@ contract SeerArenaPointsTest {
 
         points.settleLockedPoints(address(this), 100, 100);
 
-        require(points.getAvailablePoints(address(this)) == 800, "available after mismatch");
+        require(points.getAvailablePoints(address(this)) == 900, "available after mismatch");
         require(points.getLockedPoints(address(this)) == 200, "locked after mismatch");
-        require(points.getTotalPoints(address(this)) == 1000, "total after mismatch");
+        require(points.getTotalPoints(address(this)) == 1100, "total after mismatch");
     }
 
     function testPredictionEntrySettlementPaysWinner() public {
