@@ -1,6 +1,7 @@
 /* ============================================================
    SEER — My Identity: oracle card + analysis + share
    ============================================================ */
+import { useState, useRef, useEffect } from 'react';
 
 function IdentityCardCanvas({ archKey, data, onReady, display = 340 }) {
   const ref = useRef(null);
@@ -76,7 +77,7 @@ function ProtocolBar({ p }) {
   );
 }
 
-function IdentityScreen({ showToast }) {
+export function IdentityScreen({ showToast }) {
   const seer = window.useSeerStore();
   const base = seer.IDENTITY;
   const [minting, setMinting] = useState(false);
@@ -213,5 +214,3 @@ function RiskRingMini({ value }) {
     </svg>
   );
 }
-
-window.IdentityScreen = IdentityScreen;

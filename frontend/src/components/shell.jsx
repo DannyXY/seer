@@ -1,6 +1,7 @@
 /* ============================================================
    SEER — app shell: sidebar + right context rail
    ============================================================ */
+import { useState, useEffect } from 'react';
 
 const NAV = [
   { id: "feed", label: "Signal Feed", icon: "signal" },
@@ -10,7 +11,7 @@ const NAV = [
   { id: "settings", label: "Settings", icon: "settings" },
 ];
 
-function Sidebar({ route, setRoute, onDisconnect, badge, collapsed, onToggle }) {
+export function Sidebar({ route, setRoute, onDisconnect, badge, collapsed, onToggle }) {
   const seer = window.useSeerStore();
   const walletLabel = window.SEER.util.shortAddr(seer.wallet);
   return (
@@ -110,6 +111,4 @@ function RightRail({ setRoute, riskScore }) {
   );
 }
 
-window.Sidebar = Sidebar;
-window.RightRail = RightRail;
-window.NAV = NAV;
+export { Sidebar, RightRail, NAV };

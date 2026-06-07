@@ -9,6 +9,7 @@ async-trait = "0.1"
 axum = "0.7"
 chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
+ethers = { version = "2", features = ["abigen"] }
 ethers-core = "2"
 redis = { version = "0.25", features = ["tokio-comp"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }

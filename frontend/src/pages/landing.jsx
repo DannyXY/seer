@@ -4,6 +4,7 @@
    the signal spectrum emerges. Terminal density, mono voice,
    voltage used once.
    ============================================================ */
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 const SPECTRUM = [
   { key: "alpha",   hex: "#4E9BFF", name: "Alpha",       ds: "Smart-money rotation" },
@@ -153,66 +154,57 @@ function useReveal() {
 }
 
 /* ---------- connect modal (kept; lightly restyled) ---------- */
-const WALLETS = [
-  { id: "mm", name: "MetaMask", tag: "Most popular", g: "🦊" },
-  { id: "wc", name: "WalletConnect", tag: "Scan with phone", g: "◇" },
-  { id: "cb", name: "Coinbase Wallet", tag: "", g: "◎" },
-  { id: "email", name: "Continue with email", tag: "No wallet yet? Start here", g: "✉" },
-];
 function ConnectModal({ onClose, onConnect }) {
-  const [stage, setStage] = useState("pick");
-  const [chosen, setChosen] = useState(null);
   const [error, setError] = useState(null);
-  const choose = async (w) => {
-    setChosen(w);
-    setStage("connecting");
+  const [connecting, setConnecting] = useState(false);
+
+  const handleConnect = async () => {
+    setConnecting(true);
     setError(null);
     try {
       await onConnect();
+      onClose();
     } catch (err) {
       setError(err.message);
-      setStage("pick");
+      setConnecting(false);
     }
   };
+
   return (
     <div className="seer-modal-bg" onClick={onClose}>
       <div className="card" style={{ width: 400, padding: 28, animation: "fadeScale .28s var(--ease-out) both" }} onClick={(e) => e.stopPropagation()}>
-        {stage === "pick" ? (
+        <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
+          <div className="eyebrow">Connect</div>
+          <button className="btn-quiet" style={{ padding: 4 }} onClick={onClose}><Icon name="close" size={16} /></button>
+        </div>
+        <div className="serif" style={{ fontSize: 24, marginBottom: 4, textTransform: "uppercase", letterSpacing: "-0.02em" }}>Step inside.</div>
+        <div className="mut" style={{ fontSize: 13.5, marginBottom: 20 }}>One click. Email, social, or wallet. Seer creates a smart account for you automatically.</div>
+
+        {connecting ? (
+          <div className="center" style={{ flexDirection: "column", padding: "26px 0", gap: 18 }}>
+            <div className="center" style={{ width: 60, height: 60, borderRadius: 99, background: "var(--coral-wash)", color: "var(--coral)", fontSize: 26 }}>
+              <span style={{ animation: "pulseSoft 1.2s var(--ease) infinite" }}>⚙</span>
+            </div>
+            <div className="col center" style={{ gap: 4 }}>
+              <div className="serif" style={{ fontSize: 20, textTransform: "uppercase", letterSpacing: "-0.02em" }}>Authenticating…</div>
+              <div className="mut" style={{ fontSize: 13 }}>Setting up your smart account on Mantle.</div>
+            </div>
+            <div className="cbar" style={{ width: 200 }}><i style={{ background: "var(--coral)", width: "100%", transition: "width 1.3s var(--ease)" }} /></div>
+          </div>
+        ) : (
           <>
-            <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
-              <div className="eyebrow">Connect</div>
-              <button className="btn-quiet" style={{ padding: 4 }} onClick={onClose}><Icon name="close" size={16} /></button>
-            </div>
-            <div className="serif" style={{ fontSize: 24, marginBottom: 4, textTransform: "uppercase", letterSpacing: "-0.02em" }}>Step inside.</div>
-            <div className="mut" style={{ fontSize: 13.5, marginBottom: 20 }}>One click. No email, no seed phrase to type. Just connect and see.</div>
-            <div className="col gap-8">
-              {WALLETS.map((w) => (
-                <button key={w.id} className="seer-wallet-row" onClick={() => choose(w)}>
-                  <span className="center" style={{ width: 34, height: 34, borderRadius: 9, background: "var(--card-2)", border: "1px solid var(--line)", fontSize: 17 }}>{w.g}</span>
-                  <span className="col" style={{ alignItems: "flex-start", lineHeight: 1.3 }}>
-                    <span style={{ fontWeight: 500, fontSize: 14 }}>{w.name}</span>
-                    {w.tag && <span style={{ fontSize: 11.5, color: "var(--ink-3s)" }}>{w.tag}</span>}
-                  </span>
-                  <Icon name="chevR" size={16} style={{ marginLeft: "auto", color: "var(--ink-3s)" }} />
-                </button>
-              ))}
-            </div>
+            <button
+              onClick={handleConnect}
+              className="btn btn-primary"
+              style={{ width: "100%", padding: "12px 16px", marginBottom: 12, fontSize: 15 }}
+            >
+              <Icon name="arrow" size={15} /> Sign in with Privy
+            </button>
             {error && <div className="mut" style={{ fontSize: 12.5, marginTop: 12, color: "var(--danger)" }}>{error}</div>}
             <div className="row gap-6 faint" style={{ fontSize: 11.5, marginTop: 16, justifyContent: "center" }}>
               <Icon name="shield" size={13} /> Seer never holds your funds. Permissions are scoped and revocable.
             </div>
           </>
-        ) : (
-          <div className="center" style={{ flexDirection: "column", padding: "26px 0", gap: 18 }}>
-            <div className="center" style={{ width: 60, height: 60, borderRadius: 99, background: "var(--coral-wash)", color: "var(--coral)", fontSize: 26 }}>
-              <span style={{ animation: "pulseSoft 1.2s var(--ease) infinite" }}>{chosen?.g}</span>
-            </div>
-            <div className="col center" style={{ gap: 4 }}>
-              <div className="serif" style={{ fontSize: 20, textTransform: "uppercase", letterSpacing: "-0.02em" }}>Connecting to {chosen?.name}…</div>
-              <div className="mut" style={{ fontSize: 13 }}>Approve the request in your wallet.</div>
-            </div>
-            <div className="cbar" style={{ width: 200 }}><i style={{ background: "var(--coral)", width: "100%", transition: "width 1.3s var(--ease)" }} /></div>
-          </div>
         )}
       </div>
     </div>
@@ -227,7 +219,7 @@ const SURFACES = [
   { n: "04", c: "#F7A833", nm: "On-chain Identity", ds: "Every call you make and move you mirror builds a portable, provable record of what you've gotten right." },
 ];
 
-function Landing({ onEnter }) {
+export default function Landing({ onEnter }) {
   const seer = window.useSeerStore();
   const [modal, setModal] = useState(false);
   const S = seer.stats;
@@ -392,5 +384,3 @@ function Landing({ onEnter }) {
     </div>
   );
 }
-
-window.Landing = Landing;

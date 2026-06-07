@@ -1,6 +1,7 @@
 /* ============================================================
    SEER — My Agent screen: chat state machine + intents rail
    ============================================================ */
+import { useState, useRef, useEffect } from 'react';
 
 const SEER_GREETING = {
   id: "m-greet", role: "seer",
@@ -11,7 +12,7 @@ const SEER_GREETING = {
 let msgSeq = 0;
 const mid = () => "m" + (++msgSeq) + "-" + Date.now();
 
-function AgentScreen({ showToast }) {
+export function AgentScreen({ showToast }) {
   const seer = window.useSeerStore();
   const [messages, setMessages] = useState([SEER_GREETING]);
   const [input, setInput] = useState("");
@@ -255,5 +256,3 @@ function TraceModal({ intent, onClose }) {
     </div>
   );
 }
-
-window.AgentScreen = AgentScreen;

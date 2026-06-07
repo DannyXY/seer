@@ -1,6 +1,7 @@
 /* ============================================================
    SEER — Settings
    ============================================================ */
+import { useState, useEffect } from 'react';
 
 function Toggle({ on, onChange }) {
   return (
@@ -22,7 +23,7 @@ function SettingRow({ title, desc, children }) {
   );
 }
 
-function SettingsScreen() {
+export function SettingsScreen() {
   const seer = window.useSeerStore();
   const settings = seer.settings;
   const identity = seer.IDENTITY;
@@ -93,5 +94,3 @@ function SettingsScreen() {
     </div>
   );
 }
-
-window.SettingsScreen = SettingsScreen;

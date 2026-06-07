@@ -1,6 +1,7 @@
 /* ============================================================
    SEER — The Arena: predictions vs. AI + leaderboard
    ============================================================ */
+import { useState, useRef, useEffect } from 'react';
 
 function Odds({ conf }) {
   return (
@@ -121,7 +122,7 @@ function BetRow({ b }) {
   );
 }
 
-function ArenaScreen({ showToast }) {
+export function ArenaScreen({ showToast }) {
   const seer = window.useSeerStore();
   const [betting, setBetting] = useState(null);
   const [tab, setTab] = useState("bets");
@@ -215,5 +216,3 @@ function ArenaScreen({ showToast }) {
     </div>
   );
 }
-
-window.ArenaScreen = ArenaScreen;

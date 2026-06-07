@@ -1,6 +1,7 @@
 /* ============================================================
    SEER — Signal Feed (hero screen)
    ============================================================ */
+import { useState, useEffect, useRef } from 'react';
 
 function SignalCard({ s, isNew, onMirror, onDismiss }) {
   const high = s.conf >= 80;
@@ -40,7 +41,7 @@ function SignalCard({ s, isNew, onMirror, onDismiss }) {
 
 const FILTERS = ["ALL", "ALPHA", "ANOMALY", "RISK", "OPPORTUNITY"];
 
-function SignalFeed({ onMirror }) {
+export function SignalFeed({ onMirror }) {
   const seer = window.useSeerStore();
   const [dismissed, setDismissed] = useState(new Set());
   const [filter, setFilter] = useState("ALL");
@@ -126,5 +127,3 @@ function SignalFeed({ onMirror }) {
     </div>
   );
 }
-
-window.SignalFeed = SignalFeed;

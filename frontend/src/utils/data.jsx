@@ -356,6 +356,39 @@
       saveSession(session);
       return session;
     },
+    async connectWalletDirect(walletAddress) {
+      if (!walletAddress) throw new Error("No wallet address provided.");
+      const challenge = await request("/api/auth/challenge", {
+        method: "POST",
+        body: JSON.stringify({ wallet_address: walletAddress }),
+      });
+
+      // For Privy wallets, we sign using the Privy signer which is available in the global scope
+      let signature;
+      if (window.privyEthersProvider) {
+        const signer = await window.privyEthersProvider.getSigner();
+        signature = await signer.signMessage(challenge.message);
+      } else if (window.ethereum?.request) {
+        signature = await window.ethereum.request({
+          method: "personal_sign",
+          params: [challenge.message, walletAddress],
+        });
+      } else {
+        throw new Error("No signing provider available.");
+      }
+
+      const session = await request("/api/auth/verify", {
+        method: "POST",
+        body: JSON.stringify({
+          wallet_address: walletAddress,
+          nonce: challenge.nonce,
+          message: challenge.message,
+          signature,
+        }),
+      });
+      saveSession(session);
+      return session;
+    },
     disconnect: clearSession,
     async loadPublic() {
       const [signalsRes, predictionsRes, leaderboardRes, recordRes] = await Promise.all([
