@@ -37,16 +37,61 @@ frontend/
 
 ## Setup
 
-### Start Frontend Server
+### Prerequisites
 
-```python
-# Run the development server (serves on port 8088)
-python3 serve.py
+1. **Privy Account** — Create at [privy.io](https://privy.io)
+   - Create a new application
+   - Copy your App ID
+   
+2. **Pimlico API Key** — Get from [pimlico.io](https://pimlico.io)
+   - Create an account and project
+   - Copy your API key for Mantle Sepolia
 
-# Frontend will be available at http://localhost:8088/
+### Install Dependencies
+
+```bash
+cd frontend
+npm install
 ```
 
-The `serve.py` script serves the frontend as a single-page application (SPA) from the `public/` directory. All routes that don't match a static file will serve `public/index.html`.
+### Configure Environment
+
+Create `.env.development.local` with your Privy and Pimlico credentials:
+
+```bash
+cp .env.example .env.development.local
+```
+
+Then edit `.env.development.local`:
+
+```env
+VITE_PRIVY_APP_ID=your_privy_app_id_here
+VITE_PIMLICO_API_KEY=your_pimlico_api_key_here
+VITE_API_BASE=http://localhost:10000
+```
+
+### Start Frontend Development Server
+
+```bash
+npm run dev
+# Frontend runs on http://localhost:5173
+```
+
+### Build for Production
+
+```bash
+npm run build
+# Creates optimized build in dist/
+```
+
+## Architecture
+
+The frontend has been migrated from a CDN-based React setup to **Vite** with ES modules:
+
+- **Build Tool**: Vite for fast development and optimized production builds
+- **Auth**: Privy for social logins (email, Google, GitHub, Twitter, Discord)
+- **Smart Accounts**: Pimlico for account abstraction on Mantle Sepolia
+- **State Management**: Custom store pattern (window.SEER) with React external store API
 
 ## Features
 
@@ -156,11 +201,17 @@ export default function YourComponent({ title, children }) {
 
 ## Environment Variables
 
-Frontend environment variables should be set in a `.env` file:
+Frontend environment variables should be set in `.env.development.local`:
 
 ```env
+# Privy authentication (get from https://privy.io)
+VITE_PRIVY_APP_ID=your_app_id_here
+
+# Pimlico account abstraction (get from https://pimlico.io)
+VITE_PIMLICO_API_KEY=your_api_key_here
+
 # Backend API URL
-VITE_API_URL=http://localhost:10000
+VITE_API_BASE=http://localhost:10000
 
 # Network configuration
 VITE_CHAIN_ID=5003
@@ -171,9 +222,10 @@ VITE_RPC_URL=https://rpc.sepolia.mantle.xyz
 
 - **React 18** — UI framework
 - **Vite** — Build tool & dev server
-- **Axios** — HTTP client (for API calls)
-- **viem** — Ethereum/Mantle utilities
-- **wagmi** — React hooks for Ethereum
+- **Privy** — Social authentication & embedded wallets
+- **Pimlico** — Smart account abstraction (ERC-4337)
+- **ethers.js** — Blockchain utilities
+- **viem** — Ethereum/Mantle type-safe utilities
 
 ## Build & Deployment
 
@@ -194,32 +246,41 @@ npm run preview
 # Test production build locally
 ```
 
-### Docker Deployment
+## Authentication Flow
 
-```dockerfile
-# Build stage
-FROM node:18 AS builder
-WORKDIR /app
-COPY package*.json ./
-RUN npm install
-COPY . .
-RUN npm run build
+### Privy-Powered Login
 
-# Runtime stage
-FROM node:18
-WORKDIR /app
-RUN npm install -g serve
-COPY --from=builder /app/dist ./dist
-EXPOSE 3000
-CMD ["serve", "-s", "dist", "-l", "3000"]
-```
+1. User clicks "Sign in with Privy" on landing page
+2. Privy modal shows social & wallet options
+3. On successful auth:
+   - User's wallet address is captured
+   - Smart account is created via Pimlico
+   - Backend session is established
+4. User is redirected to app dashboard
+
+### Smart Account Creation
+
+- **When**: Automatically on first login
+- **Who**: Pimlico bundler
+- **How**: Deploys ERC-4337 compatible account on Mantle
+- **Cost**: Sponsored via Pimlico paymaster (free for testing)
 
 ## Troubleshooting
 
+**Privy login not working:**
+- Verify `VITE_PRIVY_APP_ID` is set correctly
+- Check Privy dashboard for enabled login methods
+- Check browser console for error messages
+
+**Smart account creation fails:**
+- Verify `VITE_PIMLICO_API_KEY` is valid
+- Check network is set to Mantle Sepolia
+- Check Pimlico dashboard for API quota
+
 **Backend API not connecting:**
-- Verify `VITE_API_URL` environment variable
-- Check backend is running on port 10000
-- Check CORS is enabled in backend (it is by default)
+- Verify `VITE_API_BASE=http://localhost:10000`
+- Check backend is running (`npm run dev` in backend/)
+- Check CORS is enabled in backend
 
 **Styling issues:**
 - Clear browser cache
@@ -231,13 +292,25 @@ CMD ["serve", "-s", "dist", "-l", "3000"]
 - Run `npm install` again
 - Clear Vite cache: `rm -rf .vite`
 
+## Completed Features
+
+✅ Privy social authentication
+✅ Smart account creation on login
+✅ Vite build system with ES modules
+✅ Multi-page routing
+✅ Signal feed & data integration
+✅ Agent intent management
+✅ Arena predictions
+✅ User identity & SBT tracking
+
 ## Next Steps
 
-1. **Wallet Integration** — Add Web3 wallet connection (MetaMask, WalletConnect)
-2. **Real Data Loading** — Connect to backend API endpoints
-3. **Error Handling** — Add toast notifications & error boundaries
-4. **State Management** — Consider Redux or Zustand for complex state
+1. **Test End-to-End** — Sign in with Privy, verify smart account is created
+2. **Complete UI Screens** — Finish remaining dashboard screens
+3. **Real Data Loading** — Connect to backend API endpoints for live data
+4. **Error Handling** — Add toast notifications & error boundaries
 5. **Testing** — Add Vitest & React Testing Library tests
+6. **Deployment** — Deploy frontend to Vercel or similar CDN
 
 ---
 
