@@ -1175,26 +1175,9 @@ impl OnchainDataProvider for MockProvider {
         &self,
         _address: &str,
     ) -> Result<Vec<PortfolioPosition>, DataProviderError> {
-        Ok(vec![
-            PortfolioPosition {
-                symbol: "MNT".to_string(),
-                amount: "420.5".to_string(),
-                usd_value: 512.31,
-                protocol: None,
-            },
-            PortfolioPosition {
-                symbol: "mETH".to_string(),
-                amount: "2.1".to_string(),
-                usd_value: 7230.02,
-                protocol: Some("mETH Protocol".to_string()),
-            },
-            PortfolioPosition {
-                symbol: "USDT".to_string(),
-                amount: "678.22".to_string(),
-                usd_value: 678.22,
-                protocol: Some("Agni Finance".to_string()),
-            },
-        ])
+        // Return empty — the wallet summary handler injects the live MNT
+        // balance via eth_getBalance. We don't fabricate token positions.
+        Ok(vec![])
     }
 
     async fn get_wallet_transactions(
