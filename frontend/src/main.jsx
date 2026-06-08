@@ -27,6 +27,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       embeddedWallets: {
         createOnLogin: 'users-without-wallets',
       },
+      appearance: {
+        theme: 'dark',
+        accentColor: '#C8F230',
+        logo: '',
+      },
     }}>
       <App />
     </PrivyProvider>

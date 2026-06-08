@@ -50,13 +50,28 @@ function pushRoute(route, replace = false) {
 }
 
 const TOAST_ICONS = { success: "check", error: "x", info: "signal" };
+const EXPLORER_TX = "https://explorer.sepolia.mantle.xyz/tx/";
+
 function Toast({ toast }) {
   if (!toast) return null;
   const icon = TOAST_ICONS[toast.kind] || "signal";
   return (
     <div className={"seer-toast seer-toast--" + toast.kind}>
-      <Icon name={icon} size={15} />
-      <span>{toast.msg}</span>
+      <div className="seer-toast-icon"><Icon name={icon} size={14} /></div>
+      <div className="seer-toast-body">
+        <span className="seer-toast-msg">{toast.msg}</span>
+        {toast.txHash && (
+          <a
+            className="seer-toast-tx"
+            href={EXPLORER_TX + toast.txHash}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {toast.txHash.slice(0, 10)}…{toast.txHash.slice(-6)}
+            <Icon name="arrow-up-right" size={11} />
+          </a>
+        )}
+      </div>
     </div>
   );
 }
@@ -174,9 +189,10 @@ function App() {
     }
   }, [connected, seer.wallet]);
 
-  const showToast = useCallback((msg, kind = 'info') => {
-    setToast({ msg, kind });
-    setTimeout(() => setToast(null), 4800);
+  const showToast = useCallback((msg, kind = 'info', txHash = null) => {
+    setToast({ msg, kind, txHash });
+    // Tx toasts stay longer so the user can click through to explorer
+    setTimeout(() => setToast(null), txHash ? 12000 : 5000);
   }, []);
 
   const onMirror = useCallback((s) => {

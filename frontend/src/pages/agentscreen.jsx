@@ -72,7 +72,7 @@ export function AgentScreen({ showToast }) {
         // 3. Tx signed - now commit to the rail and mark card done
         window.SeerAPI.commitIntent(result.intent);
         setMessages((p) => p.map((m) => m.id === msgId ? { ...m, done: true } : m));
-        showToast(`Intent anchored on-chain - tx: ${hash.slice(0, 10)}…`, 'success');
+        showToast("Intent anchored on-chain.", 'success', hash);
       } else {
         // Contract not configured - still commit, just without on-chain anchor
         window.SeerAPI.commitIntent(result.intent);

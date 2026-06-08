@@ -152,7 +152,7 @@ export function ArenaScreen({ showToast }) {
     setClaiming(true);
     try {
       const hash = await sendOnChainTx(onchain.claim_starter_calldata);
-      showToast(`Claimed 1,000 pts - tx: ${hash.slice(0, 10)}…`, 'success');
+      showToast("Claimed 1,000 starter points.", 'success', hash);
       setOnchain(prev => ({ ...prev, has_claimed_starter_points: true, available_points: 1000 }));
       window.SEER.update({ userPoints: 1000 });
     } catch (err) {
@@ -171,7 +171,7 @@ export function ArenaScreen({ showToast }) {
         setTxPending(true);
         try {
           const hash = await sendOnChainTx(result.entry_calldata);
-          showToast(`Bet confirmed on-chain - tx: ${hash.slice(0, 10)}…`, 'success');
+          showToast("Bet confirmed on-chain.", 'success', hash);
         } catch (txErr) {
           showToast(`Bet recorded. On-chain tx failed: ${txErr.message}`, 'error');
         } finally {
