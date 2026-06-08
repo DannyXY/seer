@@ -195,6 +195,62 @@ pub async fn load_intents_for_wallet(
     Ok(intents)
 }
 
+pub async fn load_intent_by_id(
+    pool: Option<&PgPool>,
+    intent_id: uuid::Uuid,
+) -> anyhow::Result<Option<crate::models::agent::AgentIntent>> {
+    use crate::models::agent::{AgentIntent, IntentStatus, ParsedIntent};
+    use sqlx::Row;
+
+    let Some(pool) = pool else {
+        return Ok(None);
+    };
+
+    let row = sqlx::query(
+        r#"
+        SELECT id, wallet_address, raw_intent, parsed_intent, status,
+               intent_hash, onchain_intent_id, created_at
+        FROM agent_intents
+        WHERE id = $1
+        "#,
+    )
+    .bind(intent_id)
+    .fetch_optional(pool)
+    .await?;
+
+    let Some(row) = row else { return Ok(None) };
+
+    let id: uuid::Uuid = row.try_get("id")?;
+    let wallet: String = row.try_get("wallet_address")?;
+    let raw: String = row.try_get("raw_intent")?;
+    let parsed_json: serde_json::Value = row.try_get("parsed_intent")?;
+    let status_str: String = row.try_get("status")?;
+    let hash: String = row.try_get("intent_hash")?;
+    let onchain_id: Option<i64> = row.try_get("onchain_intent_id")?;
+    let created_at: chrono::DateTime<Utc> = row.try_get("created_at")?;
+
+    let Ok(parsed_intent) = serde_json::from_value::<ParsedIntent>(parsed_json) else {
+        return Ok(None);
+    };
+    let status = match status_str.as_str() {
+        "ACTIVE" => IntentStatus::Active,
+        "PAUSED" => IntentStatus::Paused,
+        "COMPLETED" => IntentStatus::Completed,
+        "CANCELLED" => IntentStatus::Cancelled,
+        _ => IntentStatus::Draft,
+    };
+    Ok(Some(AgentIntent {
+        id,
+        wallet_address: wallet,
+        raw_intent: raw,
+        parsed_intent,
+        status,
+        intent_hash: hash,
+        onchain_intent_id: onchain_id.map(|v| v as u64),
+        created_at,
+    }))
+}
+
 pub async fn persist_agent_execution_log(
     pool: Option<&PgPool>,
     log: &AgentExecutionLog,

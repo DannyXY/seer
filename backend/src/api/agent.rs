@@ -10,8 +10,8 @@ use uuid::Uuid;
 use crate::{
     api::auth_guard::require_wallet,
     db::{
-        load_logs_for_intent, load_policies_for_wallet, persist_agent_execution_log,
-        persist_agent_execution_policy, persist_agent_intent,
+        load_intent_by_id, load_logs_for_intent, load_policies_for_wallet,
+        persist_agent_execution_log, persist_agent_execution_policy, persist_agent_intent,
     },
     errors::ApiError,
     models::{
@@ -599,15 +599,26 @@ fn validate_hex_address(value: &str, name: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// Resolve an intent from in-memory store, falling back to the database.
+/// Seeds the intent into memory on a DB hit so subsequent calls are fast.
+async fn resolve_intent(state: &crate::AppState, intent_id: Uuid) -> Option<crate::models::agent::AgentIntent> {
+    if let Some(intent) = state.services.agent.get_intent(intent_id) {
+        return Some(intent);
+    }
+    // Not in memory — try DB (happens after server restart).
+    if let Ok(Some(intent)) = load_intent_by_id(state.services.infra.postgres.as_ref(), intent_id).await {
+        state.services.agent.seed_intents(vec![intent.clone()]);
+        return Some(intent);
+    }
+    None
+}
+
 pub async fn pause(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(intent_id): Path<Uuid>,
 ) -> Result<Json<Value>, ApiError> {
-    let existing = state
-        .services
-        .agent
-        .get_intent(intent_id)
+    let existing = resolve_intent(&state, intent_id).await
         .ok_or(ApiError::NotFound)?;
     require_wallet(&state, &headers, &existing.wallet_address)?;
     let intent = state
@@ -633,10 +644,7 @@ pub async fn resume(
     headers: HeaderMap,
     Path(intent_id): Path<Uuid>,
 ) -> Result<Json<Value>, ApiError> {
-    let existing = state
-        .services
-        .agent
-        .get_intent(intent_id)
+    let existing = resolve_intent(&state, intent_id).await
         .ok_or(ApiError::NotFound)?;
     require_wallet(&state, &headers, &existing.wallet_address)?;
     let intent = state
@@ -661,10 +669,7 @@ pub async fn stop(
     headers: HeaderMap,
     Path(intent_id): Path<Uuid>,
 ) -> Result<Json<Value>, ApiError> {
-    let existing = state
-        .services
-        .agent
-        .get_intent(intent_id)
+    let existing = resolve_intent(&state, intent_id).await
         .ok_or(ApiError::NotFound)?;
     require_wallet(&state, &headers, &existing.wallet_address)?;
     let intent = state

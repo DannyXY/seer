@@ -99,6 +99,14 @@ async fn run_fast_jobs(state: &AppState) {
                         Some(policy.id),
                         proposal,
                     );
+                    if let Err(err) = crate::db::persist_agent_intent(
+                        state.services.infra.postgres.as_ref(),
+                        &intent,
+                    )
+                    .await
+                    {
+                        tracing::warn!(intent_id = %intent.id, error = %err, "worker: failed to upsert intent before delegated log");
+                    }
                     if let Err(err) = persist_agent_execution_log(
                         state.services.infra.postgres.as_ref(),
                         &execution_log,
@@ -150,6 +158,15 @@ async fn run_fast_jobs(state: &AppState) {
                 } else {
                     let execution_log =
                         state.services.agent.record_execution_log(&intent, proposal);
+                    // Ensure the intent row exists before inserting the FK-constrained log.
+                    if let Err(err) = crate::db::persist_agent_intent(
+                        state.services.infra.postgres.as_ref(),
+                        &intent,
+                    )
+                    .await
+                    {
+                        tracing::warn!(intent_id = %intent.id, error = %err, "worker: failed to upsert intent before log");
+                    }
                     if let Err(err) = persist_agent_execution_log(
                         state.services.infra.postgres.as_ref(),
                         &execution_log,

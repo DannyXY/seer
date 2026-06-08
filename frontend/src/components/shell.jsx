@@ -75,7 +75,6 @@ function RightRail({ setRoute, riskScore }) {
               </div>
               <div className="col grow" style={{ alignItems: "flex-end", lineHeight: 1.25 }}>
                 <span className="num" style={{ fontSize: 13.5 }}>{a.bal.toLocaleString(undefined, { maximumFractionDigits: a.sym === "mETH" ? 2 : 0 })}</span>
-                <span className="num" style={{ fontSize: 11.5, color: a.chg >= 0 ? "var(--c-opp)" : "var(--danger)" }}>{a.chg >= 0 ? "+" : ""}{a.chg}%</span>
               </div>
             </div>
           ))}
