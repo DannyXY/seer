@@ -298,6 +298,32 @@ a { color: inherit; text-decoration: none; }
   100% { transform: translateX(260%); }
 }
 
+/* ── Toast notifications ─────────────────────────────────────────────────── */
+.seer-toast {
+  position: fixed; bottom: 28px; right: 24px;
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 16px; border-radius: var(--r-md);
+  background: var(--card-2); border: 1px solid var(--line);
+  box-shadow: var(--sh-pop);
+  font-size: 13px; font-weight: 500; color: var(--ink);
+  max-width: 320px; z-index: 9999;
+  animation: toastIn .24s var(--ease-out) both;
+  pointer-events: none;
+}
+.seer-toast span:last-child {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.seer-toast svg { flex-shrink: 0; }
+.seer-toast--success { border-color: var(--coral-line); color: var(--coral-ink); }
+.seer-toast--success svg { color: var(--volt); }
+.seer-toast--error { border-color: rgba(255,90,90,0.35); background: rgba(255,60,60,0.06); color: #ff8080; }
+.seer-toast--error svg { color: #ff6060; }
+.seer-toast--info svg { color: var(--ink-2); }
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(18px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.05ms !important; }
 }

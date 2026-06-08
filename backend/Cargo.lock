@@ -3684,6 +3684,7 @@ dependencies = [
  "ethers",
  "ethers-core",
  "ethers-signers",
+ "hmac",
  "pretty_assertions",
  "redis",
  "reqwest 0.12.28",

@@ -4,21 +4,30 @@ use std::sync::RwLock;
 
 use chrono::{Duration, Utc};
 use ethers_core::types::{Address, Signature};
+use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::models::auth::{AuthChallenge, AuthSession, AuthVerifyRequest};
 
+type HmacSha256 = Hmac<Sha256>;
+
+/// Stable secret used to sign tokens.  Read from env at startup; falls back to
+/// a build-time default so development works without configuration.
+fn token_secret() -> Vec<u8> {
+    std::env::var("SESSION_SECRET")
+        .unwrap_or_else(|_| "seer-dev-secret-change-in-production".to_string())
+        .into_bytes()
+}
+
 pub struct AuthService {
     challenges: RwLock<HashMap<String, AuthChallenge>>,
-    sessions: RwLock<HashMap<String, AuthSession>>,
 }
 
 impl AuthService {
     pub fn new() -> Self {
         Self {
             challenges: RwLock::new(HashMap::new()),
-            sessions: RwLock::new(HashMap::new()),
         }
     }
 
@@ -67,47 +76,77 @@ impl AuthService {
             anyhow::bail!("signature does not match wallet");
         }
 
-        let session = AuthSession {
+        let expires_at = Utc::now() + Duration::hours(24);
+        let token = mint_token(&normalized_wallet, expires_at.timestamp());
+
+        Ok(AuthSession {
             wallet_address: normalized_wallet,
-            token: session_token(&request.signature, &request.nonce),
-            expires_at: Utc::now() + Duration::hours(24),
-        };
-
-        self.sessions
-            .write()
-            .expect("auth session store poisoned")
-            .insert(session.token.clone(), session.clone());
-
-        Ok(session)
+            token,
+            expires_at,
+        })
     }
 
+    /// Verify a token and return the session it encodes — no stored state needed.
     pub fn session_for_token(&self, token: &str) -> Option<AuthSession> {
-        let session = self
-            .sessions
-            .read()
-            .expect("auth session store poisoned")
-            .get(token)
-            .cloned()?;
-
-        (session.expires_at >= Utc::now()).then_some(session)
+        verify_token(token)
     }
 
     #[cfg(test)]
     pub fn issue_test_session(&self, wallet_address: &str) -> AuthSession {
         let normalized_wallet = normalize_wallet(wallet_address).expect("valid test wallet");
-        let token = session_token(&normalized_wallet, "test");
-        let session = AuthSession {
-            wallet_address: normalized_wallet,
-            token,
-            expires_at: Utc::now() + Duration::hours(1),
-        };
-        self.sessions
-            .write()
-            .expect("auth session store poisoned")
-            .insert(session.token.clone(), session.clone());
-        session
+        let expires_at = Utc::now() + Duration::hours(1);
+        let token = mint_token(&normalized_wallet, expires_at.timestamp());
+        AuthSession { wallet_address: normalized_wallet, token, expires_at }
     }
 }
+
+// ── Token minting / verification ─────────────────────────────────────────────
+
+/// Token format: `{wallet_hex}.{expires_unix}.{hmac_hex}`
+fn mint_token(wallet: &str, expires_unix: i64) -> String {
+    let payload = format!("{wallet}.{expires_unix}");
+    let sig = hmac_sign(&payload);
+    format!("{payload}.{sig}")
+}
+
+fn verify_token(token: &str) -> Option<AuthSession> {
+    let parts: Vec<&str> = token.splitn(3, '.').collect();
+    if parts.len() != 3 { return None; }
+    let wallet = parts[0];
+    let expires_unix: i64 = parts[1].parse().ok()?;
+    let provided_sig = parts[2];
+
+    let payload = format!("{wallet}.{expires_unix}");
+    let expected_sig = hmac_sign(&payload);
+
+    // Constant-time comparison
+    if !constant_eq(provided_sig.as_bytes(), expected_sig.as_bytes()) {
+        return None;
+    }
+
+    let expires_at = chrono::DateTime::from_timestamp(expires_unix, 0)?;
+    if expires_at < Utc::now() { return None; }
+
+    Some(AuthSession {
+        wallet_address: wallet.to_string(),
+        token: token.to_string(),
+        expires_at,
+    })
+}
+
+fn hmac_sign(payload: &str) -> String {
+    let mut mac = HmacSha256::new_from_slice(&token_secret())
+        .expect("HMAC accepts any key length");
+    mac.update(payload.as_bytes());
+    format!("{:x}", mac.finalize().into_bytes())
+}
+
+fn constant_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() { return false; }
+    a.iter().zip(b.iter()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+// ── Shared helpers ────────────────────────────────────────────────────────────
 
 pub fn normalize_wallet(wallet_address: &str) -> anyhow::Result<String> {
     let address =
@@ -126,14 +165,6 @@ fn recover_wallet(message: &str, signature: &str) -> anyhow::Result<String> {
 
 fn challenge_key(wallet_address: &str, nonce: &str) -> String {
     format!("{}:{}", wallet_address.to_lowercase(), nonce)
-}
-
-fn session_token(signature_or_wallet: &str, nonce: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(signature_or_wallet.as_bytes());
-    hasher.update(nonce.as_bytes());
-    hasher.update(Uuid::new_v4().as_bytes());
-    format!("{:x}", hasher.finalize())
 }
 
 #[cfg(test)]
@@ -164,6 +195,15 @@ mod tests {
 
         let loaded = service.session_for_token(&session.token).unwrap();
         assert_eq!(loaded.wallet_address, session.wallet_address);
+    }
+
+    #[test]
+    fn tampered_token_is_rejected() {
+        let service = AuthService::new();
+        let session = service.issue_test_session("0x0000000000000000000000000000000000000001");
+        let mut bad = session.token.clone();
+        bad.push('x');
+        assert!(service.session_for_token(&bad).is_none());
     }
 
     #[tokio::test]

@@ -9,19 +9,20 @@ use crate::models::arena::{
     ComparisonOperator, LeaderboardRow, PredictionStatus,
 };
 
+#[derive(Clone)]
 pub struct ArenaService {
-    predictions: RwLock<HashMap<Uuid, ArenaPrediction>>,
-    entries: RwLock<HashMap<Uuid, ArenaEntry>>,
-    points: RwLock<HashMap<String, u32>>,
+    predictions: std::sync::Arc<RwLock<HashMap<Uuid, ArenaPrediction>>>,
+    entries: std::sync::Arc<RwLock<HashMap<Uuid, ArenaEntry>>>,
+    points: std::sync::Arc<RwLock<HashMap<String, u32>>>,
 }
 
 impl ArenaService {
     pub fn new() -> Self {
         let prediction = seed_prediction();
         Self {
-            predictions: RwLock::new(HashMap::from([(prediction.id, prediction)])),
-            entries: RwLock::new(HashMap::new()),
-            points: RwLock::new(HashMap::new()),
+            predictions: std::sync::Arc::new(RwLock::new(HashMap::from([(prediction.id, prediction)]))),
+            entries: std::sync::Arc::new(RwLock::new(HashMap::new())),
+            points: std::sync::Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -52,6 +53,19 @@ impl ArenaService {
         Ok(())
     }
 
+    /// Sync the in-memory balance up to `onchain_balance` when it is higher.
+    /// Called before bet placement so a wallet that claimed on-chain but
+    /// whose balance isn't mirrored here yet isn't rejected.
+    pub fn sync_points(&self, wallet_address: &str, onchain_balance: u64) {
+        let key = wallet_address.to_lowercase();
+        let mut points = self.points.write().expect("arena points store poisoned");
+        let current = *points.get(&key).unwrap_or(&0);
+        let onchain = onchain_balance.min(u32::MAX as u64) as u32;
+        if onchain > current {
+            points.insert(key, onchain);
+        }
+    }
+
     pub fn user_points(&self, wallet_address: &str) -> u32 {
         let key = wallet_address.to_lowercase();
         *self
@@ -59,7 +73,7 @@ impl ArenaService {
             .read()
             .expect("arena points store poisoned")
             .get(&key)
-            .unwrap_or(&1_000)
+            .unwrap_or(&0)
     }
 
     pub fn prediction_pool(&self, prediction_id: Uuid) -> u32 {
@@ -89,6 +103,16 @@ impl ArenaService {
             anyhow::bail!("prediction has expired");
         }
 
+        let wallet_key = request.wallet_address.to_lowercase();
+
+        // Acquire locks in a consistent order (points → entries) to prevent deadlock.
+        // leaderboard() also reads points before entries, so this order is safe.
+        let mut points = self.points.write().expect("arena points store poisoned");
+        let balance = *points.get(&wallet_key).unwrap_or(&0);
+        if request.points_committed > balance {
+            anyhow::bail!("insufficient points balance");
+        }
+
         let mut entries = self.entries.write().expect("arena entry store poisoned");
         let already_entered = entries.values().any(|entry| {
             entry.prediction_id == prediction_id
@@ -100,12 +124,6 @@ impl ArenaService {
             anyhow::bail!("wallet already entered this prediction");
         }
 
-        let wallet_key = request.wallet_address.to_lowercase();
-        let mut points = self.points.write().expect("arena points store poisoned");
-        let balance = *points.get(&wallet_key).unwrap_or(&1_000);
-        if request.points_committed > balance {
-            anyhow::bail!("insufficient points balance");
-        }
         points.insert(wallet_key, balance - request.points_committed);
 
         let entry = ArenaEntry {
@@ -137,12 +155,19 @@ impl ArenaService {
     pub fn leaderboard(&self) -> Vec<LeaderboardRow> {
         let mut rows_by_wallet: HashMap<String, LeaderboardRow> = HashMap::new();
 
-        for (wallet, balance) in self
+        // Acquire in consistent order: points first, then entries.
+        let points_snap = self
             .points
             .read()
             .expect("arena points store poisoned")
-            .iter()
-        {
+            .clone();
+        let entries_snap = self
+            .entries
+            .read()
+            .expect("arena entry store poisoned")
+            .clone();
+
+        for (wallet, balance) in &points_snap {
             rows_by_wallet.insert(
                 wallet.clone(),
                 LeaderboardRow {
@@ -156,25 +181,26 @@ impl ArenaService {
             );
         }
 
-        for entry in self
-            .entries
-            .read()
-            .expect("arena entry store poisoned")
-            .values()
-        {
+        for entry in entries_snap.values() {
+            let wallet_key = entry.wallet_address.to_lowercase();
             let row = rows_by_wallet
-                .entry(entry.wallet_address.clone())
+                .entry(wallet_key.clone())
                 .or_insert_with(|| LeaderboardRow {
                     rank: 0,
                     wallet_address: entry.wallet_address.clone(),
-                    total_points: 1_000,
+                    total_points: *points_snap.get(&wallet_key).unwrap_or(&0) as i32,
                     weekly_gain: 0,
                     accuracy_rate: None,
                     entries_count: 0,
                 });
             row.entries_count += 1;
-            row.weekly_gain += entry.points_delta.unwrap_or(0);
-            row.total_points += entry.points_delta.unwrap_or(0);
+            if matches!(entry.status, ArenaEntryStatus::Active) {
+                // Include locked (committed) points so the leaderboard reflects true total.
+                row.total_points += entry.points_committed as i32;
+            }
+            if let Some(delta) = entry.points_delta {
+                row.weekly_gain += delta;
+            }
         }
 
         if rows_by_wallet.is_empty() {
@@ -197,6 +223,149 @@ impl ArenaService {
             row.rank = (index + 1) as u32;
         }
         rows
+    }
+
+    /// Resolve all expired open predictions given a metric lookup function.
+    /// Returns the IDs of predictions that were resolved.
+    pub fn resolve_expired<F>(&self, fetch_metric: F) -> Vec<Uuid>
+    where
+        F: Fn(&str) -> Option<f64>,
+    {
+        let now = Utc::now();
+
+        // Collect expired open predictions without holding the write lock.
+        let expired: Vec<ArenaPrediction> = self
+            .predictions
+            .read()
+            .expect("arena prediction store poisoned")
+            .values()
+            .filter(|p| matches!(p.status, PredictionStatus::Open) && p.expiry_time <= now)
+            .cloned()
+            .collect();
+
+        let mut resolved_ids = Vec::new();
+
+        for mut prediction in expired {
+            let Some(final_value) = fetch_metric(&prediction.metric) else {
+                continue;
+            };
+
+            let seer_correct = match prediction.comparison_operator {
+                ComparisonOperator::GreaterThanOrEqual => final_value >= prediction.target_value,
+                ComparisonOperator::LessThanOrEqual => final_value <= prediction.target_value,
+            };
+
+            let outcome_label = if seer_correct { "SeerCorrect" } else { "SeerIncorrect" };
+            prediction.status = PredictionStatus::Resolved;
+            prediction.final_value = Some(final_value);
+            prediction.result = Some(outcome_label.to_string());
+
+            self.predictions
+                .write()
+                .expect("arena prediction store poisoned")
+                .insert(prediction.id, prediction.clone());
+
+            // Acquire in consistent order: points first, entries second.
+            let mut points = self.points.write().expect("arena points store poisoned");
+            let mut entries = self.entries.write().expect("arena entry store poisoned");
+
+            for entry in entries.values_mut().filter(|e| {
+                e.prediction_id == prediction.id && matches!(e.status, ArenaEntryStatus::Active)
+            }) {
+                let entry_backed_seer = matches!(entry.user_position, ArenaPosition::BackSeer)
+                    == matches!(prediction.seer_position, ArenaPosition::BackSeer);
+                let entry_correct = if seer_correct {
+                    entry_backed_seer
+                } else {
+                    !entry_backed_seer
+                };
+
+                let delta = if entry_correct {
+                    entry.points_committed as i32
+                } else {
+                    -(entry.points_committed as i32)
+                };
+
+                entry.points_delta = Some(delta);
+                entry.status = ArenaEntryStatus::Resolved;
+                entry.resolved_at = Some(now);
+
+                let wallet_key = entry.wallet_address.to_lowercase();
+                let available = *points.get(&wallet_key).unwrap_or(&0);
+                let new_balance = if delta >= 0 {
+                    available + entry.points_committed + delta as u32
+                } else {
+                    available.saturating_sub((-delta) as u32 - entry.points_committed.min((-delta) as u32))
+                        + entry.points_committed.saturating_sub((-delta) as u32)
+                };
+                points.insert(wallet_key, new_balance);
+            }
+
+            resolved_ids.push(prediction.id);
+        }
+
+        resolved_ids
+    }
+
+    /// Bulk-load predictions into in-memory store without overwriting existing entries.
+    pub fn seed_predictions(&self, predictions: Vec<ArenaPrediction>) {
+        let mut store = self.predictions.write().expect("arena prediction store poisoned");
+        for pred in predictions {
+            store.entry(pred.id).or_insert(pred);
+        }
+    }
+
+    /// Bulk-load entries into in-memory store without overwriting existing entries.
+    pub fn seed_entries(&self, entries: Vec<ArenaEntry>) {
+        let mut store = self.entries.write().expect("arena entry store poisoned");
+        for entry in entries {
+            store.entry(entry.id).or_insert(entry);
+        }
+    }
+
+    /// Set the on-chain prediction ID for the seed prediction (called after contract creation).
+    pub fn register_onchain_prediction_id(&self, prediction_id: Uuid, onchain_id: u64) {
+        let mut predictions = self.predictions.write().expect("arena prediction store poisoned");
+        if let Some(pred) = predictions.get_mut(&prediction_id) {
+            pred.onchain_prediction_id = Some(onchain_id);
+        }
+    }
+
+    pub fn seer_record(&self) -> (u32, u32) {
+        let entries_snap = self
+            .entries
+            .read()
+            .expect("arena entry store poisoned")
+            .clone();
+        let predictions_snap = self
+            .predictions
+            .read()
+            .expect("arena prediction store poisoned")
+            .clone();
+
+        let mut total = 0u32;
+        let mut correct = 0u32;
+
+        for entry in entries_snap.values() {
+            if !matches!(entry.status, ArenaEntryStatus::Resolved) {
+                continue;
+            }
+            let Some(prediction) = predictions_snap.get(&entry.prediction_id) else {
+                continue;
+            };
+            let seer_correct = prediction
+                .result
+                .as_deref()
+                .map(|r| r == "SeerCorrect")
+                .unwrap_or(false);
+
+            total += 1;
+            if seer_correct {
+                correct += 1;
+            }
+        }
+
+        (total, correct)
     }
 }
 
@@ -223,7 +392,7 @@ fn seed_prediction() -> ArenaPrediction {
 mod tests {
     use super::*;
 
-    fn request(wallet_address: &str) -> ArenaEntryRequest {
+    fn funded_request(wallet_address: &str) -> ArenaEntryRequest {
         ArenaEntryRequest {
             wallet_address: wallet_address.to_string(),
             user_position: ArenaPosition::BackSeer,
@@ -231,13 +400,19 @@ mod tests {
         }
     }
 
+    fn fund(service: &ArenaService, wallet: &str, amount: u32) {
+        service.points.write().expect("poisoned")
+            .insert(wallet.to_lowercase(), amount);
+    }
+
     #[test]
     fn enters_prediction_and_lists_wallet_entries() {
         let service = ArenaService::new();
         let prediction_id = service.predictions()[0].id;
+        fund(&service, "0xabc", 500);
 
         let entry = service
-            .enter_prediction(prediction_id, request("0xabc"))
+            .enter_prediction(prediction_id, funded_request("0xabc"))
             .unwrap();
 
         assert_eq!(entry.prediction_id, prediction_id);
@@ -249,11 +424,12 @@ mod tests {
     fn rejects_duplicate_prediction_entry_for_same_wallet() {
         let service = ArenaService::new();
         let prediction_id = service.predictions()[0].id;
+        fund(&service, "0xabc", 500);
 
         service
-            .enter_prediction(prediction_id, request("0xabc"))
+            .enter_prediction(prediction_id, funded_request("0xabc"))
             .unwrap();
-        let duplicate = service.enter_prediction(prediction_id, request("0xABC"));
+        let duplicate = service.enter_prediction(prediction_id, funded_request("0xABC"));
 
         assert!(duplicate.is_err());
     }
@@ -262,14 +438,16 @@ mod tests {
     fn leaderboard_reflects_entered_wallet() {
         let service = ArenaService::new();
         let prediction_id = service.predictions()[0].id;
+        fund(&service, "0xleader", 500);
 
         service
-            .enter_prediction(prediction_id, request("0xleader"))
+            .enter_prediction(prediction_id, funded_request("0xleader"))
             .unwrap();
         let leaderboard = service.leaderboard();
 
         assert_eq!(leaderboard[0].wallet_address, "0xleader");
         assert_eq!(leaderboard[0].entries_count, 1);
-        assert_eq!(leaderboard[0].total_points, 900);
+        // 400 available + 100 locked = 500 total
+        assert_eq!(leaderboard[0].total_points, 500);
     }
 }

@@ -29,7 +29,7 @@ impl SignalEngine {
 
         if let Some(movement) = movements.first() {
             signals.push(Signal {
-                id: Uuid::from_u128(0x11111111111111111111111111111111),
+                id: Uuid::new_v4(),
                 category: SignalCategory::Alpha,
                 headline: format!("Smart money {} {}", movement.direction, movement.protocol),
                 explanation: "Structured provider data shows high-confidence wallet movement into the protocol.".to_string(),
@@ -46,7 +46,7 @@ impl SignalEngine {
         if let Some(metrics) = metrics {
             if metrics.tvl_change_24h_pct >= 8.0 {
                 signals.push(Signal {
-                    id: Uuid::from_u128(0x22222222222222222222222222222222),
+                    id: Uuid::new_v4(),
                     category: SignalCategory::Opportunity,
                     headline: format!("{} TVL climbed {:.1}% in 24h", metrics.protocol, metrics.tvl_change_24h_pct),
                     explanation: "The protocol crossed Seer's movement threshold and is eligible for Arena prediction generation.".to_string(),
@@ -64,7 +64,7 @@ impl SignalEngine {
         if let Some(flow) = flows.first() {
             if flow.smart_money_wallet_count >= 5 {
                 signals.push(Signal {
-                    id: Uuid::from_u128(0x33333333333333333333333333333333),
+                    id: Uuid::new_v4(),
                     category: SignalCategory::Anomaly,
                     headline: format!("{} smart-money flow intensified", flow.token),
                     explanation: "Multiple smart-money wallets moved into the same asset window."

@@ -113,7 +113,12 @@ export function SignalFeed({ onMirror }) {
 
       <div className="seer-feed">
         {shown.length === 0 ? (
-          query || filter !== "ALL" ? (
+          seer.signalsLoading ? (
+            <div className="seer-signals-loading">
+              <div className="seer-spinner" />
+              <span className="mono" style={{ fontSize: 13, color: "var(--ink-3s)", marginTop: 14 }}>Reading the chain…</span>
+            </div>
+          ) : query || filter !== "ALL" ? (
             <EmptyState icon="search" title="Nothing matches yet." body="No signals fit this filter right now. Seer is still watching — try ALL, or clear your search." cta="Clear filters" onCta={() => { setFilter("ALL"); setQuery(""); }} />
           ) : (
             <EmptyState icon="eye" title="Seer is watching." body="Signals will appear here the moment they are detected. Nothing escapes a patient eye." />

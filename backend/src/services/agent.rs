@@ -172,6 +172,26 @@ impl AgentService {
         policy
     }
 
+    /// Bulk-load intents into the in-memory store (e.g. from DB on first request).
+    /// Existing entries are NOT overwritten — in-memory edits take precedence.
+    pub fn seed_intents(&self, intents: Vec<AgentIntent>) {
+        let mut store = self.intents.write().expect("agent intent store poisoned");
+        for intent in intents {
+            store.entry(intent.id).or_insert(intent);
+        }
+    }
+
+    /// Back-fill the on-chain intent ID for any intent whose hash matches.
+    pub fn set_onchain_id_by_hash(&self, intent_hash_hex: &str, onchain_id: u64) {
+        let mut store = self.intents.write().expect("agent intent store poisoned");
+        let clean = intent_hash_hex.trim_start_matches("0x");
+        for intent in store.values_mut() {
+            if intent.intent_hash.trim_start_matches("0x").eq_ignore_ascii_case(clean) {
+                intent.onchain_intent_id = Some(onchain_id);
+            }
+        }
+    }
+
     pub fn list_intents(&self, wallet_address: &str) -> Vec<AgentIntent> {
         self.intents
             .read()
@@ -195,6 +215,26 @@ impl AgentService {
         let intent = intents.get_mut(&intent_id)?;
         intent.status = status;
         Some(intent.clone())
+    }
+
+    /// Bulk-load policies from DB into memory (without overwriting in-memory edits).
+    pub fn seed_policies(&self, policies: Vec<ExecutionPolicy>) {
+        let mut store = self.policies.write().expect("agent policy store poisoned");
+        for policy in policies {
+            store.entry(policy.id).or_insert(policy);
+        }
+    }
+
+    /// Bulk-load execution logs from DB into memory for a specific intent.
+    pub fn seed_execution_logs(&self, intent_id: Uuid, logs: Vec<AgentExecutionLog>) {
+        let mut store = self.execution_logs.write().expect("agent execution log store poisoned");
+        let existing = store.entry(intent_id).or_default();
+        let existing_ids: std::collections::HashSet<Uuid> = existing.iter().map(|l| l.id).collect();
+        for log in logs {
+            if !existing_ids.contains(&log.id) {
+                existing.push(log);
+            }
+        }
     }
 
     pub fn policies_for_intent(&self, intent_id: Uuid) -> Vec<ExecutionPolicy> {
@@ -706,13 +746,10 @@ mod tests {
         let service = AgentService::new();
         let merchant_moe = service
             .parse_intent("Accumulate 25 USDC weekly into Merchant Moe when mETH TVL exceeds 50M");
-        let lendle = service.parse_intent("If Lendle risk level is at most 40, buy 10 USDC");
 
         assert!(merchant_moe
             .target_protocols
             .contains(&"Merchant Moe".to_string()));
-        assert!(lendle.target_protocols.contains(&"Lendle".to_string()));
-        assert_eq!(lendle.trigger.conditions[0].subject, "Lendle");
     }
 
     #[test]

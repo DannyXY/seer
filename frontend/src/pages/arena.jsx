@@ -2,6 +2,7 @@
    SEER — The Arena: predictions vs. AI + leaderboard
    ============================================================ */
 import { useState, useRef, useEffect } from 'react';
+import { sendOnChainTx } from '../utils/onchain.js';
 
 function Odds({ conf }) {
   return (
@@ -122,21 +123,65 @@ function BetRow({ b }) {
   );
 }
 
+
 export function ArenaScreen({ showToast }) {
   const seer = window.useSeerStore();
   const [betting, setBetting] = useState(null);
   const [tab, setTab] = useState("bets");
+  const [onchain, setOnchain] = useState(null); // { available_points, has_claimed_starter_points, claim_starter_calldata }
+  const [claiming, setClaiming] = useState(false);
+  const [txPending, setTxPending] = useState(false);
   const [, force] = useState(0);
   useEffect(() => { const id = setInterval(() => force((x) => x + 1), 1000); return () => clearInterval(id); }, []);
 
+  // Load on-chain points state when the screen mounts
+  useEffect(() => {
+    window.SeerAPI.loadOnChainPoints().then(data => {
+      if (!data) return;
+      setOnchain(data);
+      if (data.available_points > 0) {
+        window.SEER.update({ userPoints: data.available_points });
+      }
+    });
+  }, [seer.wallet]);
+
   const rec = seer.SEER_RECORD;
+
+  const claimStarterPoints = async () => {
+    if (!onchain?.claim_starter_calldata) return;
+    setClaiming(true);
+    try {
+      const hash = await sendOnChainTx(onchain.claim_starter_calldata);
+      showToast(`Claimed 1,000 pts — tx: ${hash.slice(0, 10)}…`, 'success');
+      setOnchain(prev => ({ ...prev, has_claimed_starter_points: true, available_points: 1000 }));
+      window.SEER.update({ userPoints: 1000 });
+    } catch (err) {
+      showToast(err.message || "Claim failed.", 'error');
+    } finally {
+      setClaiming(false);
+    }
+  };
+
   const place = async (pred, side, amt) => {
     try {
-      await window.SeerAPI.placeBet(pred.id, side, amt);
+      const result = await window.SeerAPI.placeBet(pred.id, side, amt);
       setBetting(null); setTab("bets");
-      showToast(side === "AGREE" ? "Bet placed — you're with Seer." : "Bet placed — you're against Seer. Bold.");
+
+      if (result.entry_calldata) {
+        setTxPending(true);
+        try {
+          const hash = await sendOnChainTx(result.entry_calldata);
+          showToast(`Bet confirmed on-chain — tx: ${hash.slice(0, 10)}…`, 'success');
+        } catch (txErr) {
+          showToast(`Bet recorded. On-chain tx failed: ${txErr.message}`, 'error');
+        } finally {
+          setTxPending(false);
+        }
+      } else {
+        showToast(side === "AGREE" ? "Bet placed — you're with Seer." : "Bet placed — you're against Seer. Bold.", 'success');
+      }
     } catch (err) {
-      showToast(err.message || "Bet failed.");
+      showToast(err.message || "Bet failed.", 'error');
     }
   };
 
@@ -155,6 +200,25 @@ export function ArenaScreen({ showToast }) {
           </span>
         </div>
       </header>
+
+      {onchain && !onchain.has_claimed_starter_points && onchain.claim_starter_calldata && (
+        <div className="seer-claim-banner">
+          <div className="col" style={{ gap: 3 }}>
+            <span style={{ fontWeight: 600, fontSize: 14 }}>Claim your 1,000 starter points</span>
+            <span className="mut" style={{ fontSize: 12.5 }}>One on-chain transaction mints your points to Mantle Sepolia. Required to place bets.</span>
+          </div>
+          <button className="btn btn-primary" style={{ flexShrink: 0, padding: "10px 18px" }} onClick={claimStarterPoints} disabled={claiming}>
+            {claiming ? "Claiming…" : <>Claim 1,000 pts<Icon name="arrow" size={15} /></>}
+          </button>
+        </div>
+      )}
+
+      {txPending && (
+        <div className="seer-claim-banner" style={{ borderColor: "var(--c-opp-line)", background: "var(--c-opp-wash)" }}>
+          <div className="seer-spinner" style={{ width: 18, height: 18, borderTopColor: "var(--c-opp)", flexShrink: 0 }} />
+          <span style={{ fontSize: 13.5 }}>Sending bet to Mantle Sepolia — confirm in your wallet…</span>
+        </div>
+      )}
 
       <div className="seer-arena-grid">
         {/* predictions */}

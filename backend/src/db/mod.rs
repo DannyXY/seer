@@ -7,6 +7,11 @@ use sqlx::{postgres::PgPoolOptions, types::BigDecimal, PgPool};
 use crate::config::Settings;
 use crate::models::{
     agent::{AgentExecutionLog, AgentIntent, ExecutionPolicy, IntentExecutionMode, IntentStatus},
+    arena::{
+        ArenaEntry, ArenaEntryStatus, ArenaPrediction, ArenaPosition, ComparisonOperator,
+        PredictionStatus,
+    },
+    settings::UserSettings,
     signals::{Signal, SignalCategory},
 };
 
@@ -107,6 +112,7 @@ pub async fn persist_agent_intent(
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
         ON CONFLICT (intent_hash) DO UPDATE SET
+            id = EXCLUDED.id,
             wallet_address = EXCLUDED.wallet_address,
             raw_intent = EXCLUDED.raw_intent,
             parsed_intent = EXCLUDED.parsed_intent,
@@ -129,6 +135,65 @@ pub async fn persist_agent_intent(
     .await?;
 
     Ok(())
+}
+
+pub async fn load_intents_for_wallet(
+    pool: Option<&PgPool>,
+    wallet_address: &str,
+) -> anyhow::Result<Vec<crate::models::agent::AgentIntent>> {
+    use crate::models::agent::{AgentIntent, IntentStatus, ParsedIntent};
+    use sqlx::Row;
+
+    let Some(pool) = pool else {
+        return Ok(Vec::new());
+    };
+
+    let rows = sqlx::query(
+        r#"
+        SELECT id, wallet_address, raw_intent, parsed_intent, status,
+               intent_hash, onchain_intent_id, created_at
+        FROM agent_intents
+        WHERE LOWER(wallet_address) = LOWER($1)
+        ORDER BY created_at DESC
+        "#,
+    )
+    .bind(wallet_address)
+    .fetch_all(pool)
+    .await?;
+
+    let mut intents = Vec::new();
+    for row in rows {
+        let id: uuid::Uuid = row.try_get("id")?;
+        let wallet: String = row.try_get("wallet_address")?;
+        let raw: String = row.try_get("raw_intent")?;
+        let parsed_json: serde_json::Value = row.try_get("parsed_intent")?;
+        let status_str: String = row.try_get("status")?;
+        let hash: String = row.try_get("intent_hash")?;
+        let onchain_id: Option<i64> = row.try_get("onchain_intent_id")?;
+        let created_at: chrono::DateTime<Utc> = row.try_get("created_at")?;
+
+        let Ok(parsed_intent) = serde_json::from_value::<ParsedIntent>(parsed_json) else {
+            continue; // skip malformed rows
+        };
+        let status = match status_str.as_str() {
+            "ACTIVE" => IntentStatus::Active,
+            "PAUSED" => IntentStatus::Paused,
+            "COMPLETED" => IntentStatus::Completed,
+            "CANCELLED" => IntentStatus::Cancelled,
+            _ => IntentStatus::Draft,
+        };
+        intents.push(AgentIntent {
+            id,
+            wallet_address: wallet,
+            raw_intent: raw,
+            parsed_intent,
+            status,
+            intent_hash: hash,
+            onchain_intent_id: onchain_id.map(|v| v as u64),
+            created_at,
+        });
+    }
+    Ok(intents)
 }
 
 pub async fn persist_agent_execution_log(
@@ -476,6 +541,400 @@ pub async fn get_lp_positions(
     }).collect())
 }
 
+// ── Arena predictions ────────────────────────────────────────────────────────
+
+pub async fn persist_arena_prediction(
+    pool: Option<&PgPool>,
+    prediction: &ArenaPrediction,
+) -> anyhow::Result<()> {
+    let Some(pool) = pool else { return Ok(()); };
+
+    let op_str = match prediction.comparison_operator {
+        ComparisonOperator::GreaterThanOrEqual => "GTE",
+        ComparisonOperator::LessThanOrEqual => "LTE",
+    };
+    let pos_str = match prediction.seer_position {
+        ArenaPosition::BackSeer => "BACK_SEER",
+        ArenaPosition::ChallengeSeer => "CHALLENGE_SEER",
+    };
+    let status_str = match prediction.status {
+        PredictionStatus::Open => "OPEN",
+        PredictionStatus::Locked => "LOCKED",
+        PredictionStatus::Resolved => "RESOLVED",
+        PredictionStatus::Cancelled => "CANCELLED",
+    };
+
+    sqlx::query(r#"
+        INSERT INTO arena_predictions (
+            id, onchain_prediction_id, claim, metric, target_value,
+            comparison_operator, expiry_time, seer_position, seer_confidence,
+            reasoning, status, result, final_value, created_at
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+        ON CONFLICT (id) DO UPDATE SET
+            onchain_prediction_id = EXCLUDED.onchain_prediction_id,
+            status                = EXCLUDED.status,
+            result                = EXCLUDED.result,
+            final_value           = EXCLUDED.final_value,
+            expiry_time           = EXCLUDED.expiry_time
+    "#)
+    .bind(prediction.id)
+    .bind(prediction.onchain_prediction_id.map(|v| v as i64))
+    .bind(&prediction.claim)
+    .bind(&prediction.metric)
+    .bind(prediction.target_value)
+    .bind(op_str)
+    .bind(prediction.expiry_time)
+    .bind(pos_str)
+    .bind(prediction.seer_confidence as i32)
+    .bind(&prediction.reasoning)
+    .bind(status_str)
+    .bind(&prediction.result)
+    .bind(prediction.final_value)
+    .bind(prediction.created_at)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn load_arena_predictions(
+    pool: Option<&PgPool>,
+) -> anyhow::Result<Vec<ArenaPrediction>> {
+    use sqlx::Row;
+    let Some(pool) = pool else { return Ok(Vec::new()); };
+
+    let rows = sqlx::query(r#"
+        SELECT id, onchain_prediction_id, claim, metric, target_value,
+               comparison_operator, expiry_time, seer_position, seer_confidence,
+               reasoning, status, result, final_value, created_at
+        FROM arena_predictions
+        ORDER BY created_at DESC
+    "#)
+    .fetch_all(pool)
+    .await?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        let id: uuid::Uuid = row.try_get("id")?;
+        let onchain_id: Option<i64> = row.try_get("onchain_prediction_id")?;
+        let claim: String = row.try_get("claim")?;
+        let metric: String = row.try_get("metric")?;
+        let target_value: f64 = row.try_get("target_value")?;
+        let op_str: String = row.try_get("comparison_operator")?;
+        let expiry_time: DateTime<Utc> = row.try_get("expiry_time")?;
+        let pos_str: String = row.try_get("seer_position")?;
+        let seer_confidence: i32 = row.try_get("seer_confidence")?;
+        let reasoning: String = row.try_get("reasoning")?;
+        let status_str: String = row.try_get("status")?;
+        let result: Option<String> = row.try_get("result")?;
+        let final_value: Option<f64> = row.try_get("final_value")?;
+        let created_at: DateTime<Utc> = row.try_get("created_at")?;
+
+        let comparison_operator = match op_str.as_str() {
+            "LTE" => ComparisonOperator::LessThanOrEqual,
+            _ => ComparisonOperator::GreaterThanOrEqual,
+        };
+        let seer_position = match pos_str.as_str() {
+            "CHALLENGE_SEER" => ArenaPosition::ChallengeSeer,
+            _ => ArenaPosition::BackSeer,
+        };
+        let status = match status_str.as_str() {
+            "LOCKED" => PredictionStatus::Locked,
+            "RESOLVED" => PredictionStatus::Resolved,
+            "CANCELLED" => PredictionStatus::Cancelled,
+            _ => PredictionStatus::Open,
+        };
+
+        out.push(ArenaPrediction {
+            id,
+            onchain_prediction_id: onchain_id.map(|v| v as u64),
+            claim,
+            metric,
+            target_value,
+            comparison_operator,
+            expiry_time,
+            seer_position,
+            seer_confidence: seer_confidence as u8,
+            reasoning,
+            status,
+            result,
+            final_value,
+            created_at,
+        });
+    }
+    Ok(out)
+}
+
+// ── Arena entries ─────────────────────────────────────────────────────────────
+
+pub async fn persist_arena_entry(
+    pool: Option<&PgPool>,
+    entry: &ArenaEntry,
+) -> anyhow::Result<()> {
+    let Some(pool) = pool else { return Ok(()); };
+
+    let pos_str = match entry.user_position {
+        ArenaPosition::BackSeer => "BACK_SEER",
+        ArenaPosition::ChallengeSeer => "CHALLENGE_SEER",
+    };
+    let status_str = match entry.status {
+        ArenaEntryStatus::Active => "ACTIVE",
+        ArenaEntryStatus::Resolved => "RESOLVED",
+        ArenaEntryStatus::Cancelled => "CANCELLED",
+    };
+
+    sqlx::query(r#"
+        INSERT INTO arena_entries (
+            id, prediction_id, wallet_address, user_position,
+            points_committed, status, points_delta, tx_hash,
+            created_at, resolved_at
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        ON CONFLICT (id) DO UPDATE SET
+            status       = EXCLUDED.status,
+            points_delta = EXCLUDED.points_delta,
+            resolved_at  = EXCLUDED.resolved_at
+    "#)
+    .bind(entry.id)
+    .bind(entry.prediction_id)
+    .bind(&entry.wallet_address)
+    .bind(pos_str)
+    .bind(entry.points_committed as i32)
+    .bind(status_str)
+    .bind(entry.points_delta)
+    .bind(&entry.tx_hash)
+    .bind(entry.created_at)
+    .bind(entry.resolved_at)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn load_entries_for_wallet(
+    pool: Option<&PgPool>,
+    wallet_address: &str,
+) -> anyhow::Result<Vec<ArenaEntry>> {
+    use sqlx::Row;
+    let Some(pool) = pool else { return Ok(Vec::new()); };
+
+    let rows = sqlx::query(r#"
+        SELECT id, prediction_id, wallet_address, user_position,
+               points_committed, status, points_delta, tx_hash,
+               created_at, resolved_at
+        FROM arena_entries
+        WHERE LOWER(wallet_address) = LOWER($1)
+        ORDER BY created_at DESC
+    "#)
+    .bind(wallet_address)
+    .fetch_all(pool)
+    .await?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        let id: uuid::Uuid = row.try_get("id")?;
+        let prediction_id: uuid::Uuid = row.try_get("prediction_id")?;
+        let wallet: String = row.try_get("wallet_address")?;
+        let pos_str: String = row.try_get("user_position")?;
+        let points_committed: i32 = row.try_get("points_committed")?;
+        let status_str: String = row.try_get("status")?;
+        let points_delta: Option<i32> = row.try_get("points_delta")?;
+        let tx_hash: Option<String> = row.try_get("tx_hash")?;
+        let created_at: DateTime<Utc> = row.try_get("created_at")?;
+        let resolved_at: Option<DateTime<Utc>> = row.try_get("resolved_at")?;
+
+        let user_position = match pos_str.as_str() {
+            "CHALLENGE_SEER" => ArenaPosition::ChallengeSeer,
+            _ => ArenaPosition::BackSeer,
+        };
+        let status = match status_str.as_str() {
+            "RESOLVED" => ArenaEntryStatus::Resolved,
+            "CANCELLED" => ArenaEntryStatus::Cancelled,
+            _ => ArenaEntryStatus::Active,
+        };
+
+        out.push(ArenaEntry {
+            id,
+            prediction_id,
+            wallet_address: wallet,
+            user_position,
+            points_committed: points_committed as u32,
+            status,
+            points_delta,
+            tx_hash,
+            created_at,
+            resolved_at,
+        });
+    }
+    Ok(out)
+}
+
+// ── Agent execution policies ──────────────────────────────────────────────────
+
+pub async fn load_policies_for_wallet(
+    pool: Option<&PgPool>,
+    wallet_address: &str,
+) -> anyhow::Result<Vec<ExecutionPolicy>> {
+    use sqlx::Row;
+    let Some(pool) = pool else { return Ok(Vec::new()); };
+
+    let rows = sqlx::query(r#"
+        SELECT id, intent_id, wallet_address, allowed_assets, allowed_protocols,
+               max_spend_usd, max_transaction_count, expires_at, status,
+               policy_hash, created_at
+        FROM agent_execution_policies
+        WHERE LOWER(wallet_address) = LOWER($1)
+        ORDER BY created_at DESC
+    "#)
+    .bind(wallet_address)
+    .fetch_all(pool)
+    .await?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        let id: uuid::Uuid = row.try_get("id")?;
+        let intent_id: uuid::Uuid = row.try_get("intent_id")?;
+        let wallet: String = row.try_get("wallet_address")?;
+        let assets_json: serde_json::Value = row.try_get("allowed_assets")?;
+        let protocols_json: serde_json::Value = row.try_get("allowed_protocols")?;
+        let max_spend: Option<BigDecimal> = row.try_get("max_spend_usd")?;
+        let max_tx_count: Option<i32> = row.try_get("max_transaction_count")?;
+        let expires_at: DateTime<Utc> = row.try_get("expires_at")?;
+        let status_str: String = row.try_get("status")?;
+        let policy_hash: String = row.try_get("policy_hash")?;
+
+        let allowed_assets: Vec<String> =
+            serde_json::from_value(assets_json).unwrap_or_default();
+        let allowed_protocols: Vec<String> =
+            serde_json::from_value(protocols_json).unwrap_or_default();
+        let max_spend_usd = max_spend
+            .and_then(|v| v.to_string().parse::<f64>().ok());
+        let status = match status_str.as_str() {
+            "ACTIVE" => IntentStatus::Active,
+            "PAUSED" => IntentStatus::Paused,
+            "COMPLETED" => IntentStatus::Completed,
+            "CANCELLED" => IntentStatus::Cancelled,
+            _ => IntentStatus::Draft,
+        };
+
+        out.push(ExecutionPolicy {
+            id,
+            intent_id,
+            wallet_address: wallet,
+            smart_account_address: None,
+            session_key_address: None,
+            allowed_assets,
+            allowed_protocols,
+            allowed_contracts: Vec::new(),
+            max_spend_usd,
+            max_transaction_count: max_tx_count.map(|v| v as u32),
+            transactions_used: 0,
+            revoked_at: None,
+            expires_at,
+            status,
+            policy_hash,
+        });
+    }
+    Ok(out)
+}
+
+// ── Agent execution logs ──────────────────────────────────────────────────────
+
+pub async fn load_logs_for_intent(
+    pool: Option<&PgPool>,
+    intent_id: uuid::Uuid,
+) -> anyhow::Result<Vec<AgentExecutionLog>> {
+    use sqlx::Row;
+    let Some(pool) = pool else { return Ok(Vec::new()); };
+
+    let rows = sqlx::query(r#"
+        SELECT l.id, l.intent_id, l.policy_id, l.action_type, l.proposed_action,
+               l.execution_status, l.reasoning_hash, l.created_at,
+               i.wallet_address
+        FROM agent_execution_logs l
+        JOIN agent_intents i ON i.id = l.intent_id
+        WHERE l.intent_id = $1
+        ORDER BY l.created_at ASC
+    "#)
+    .bind(intent_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        let id: uuid::Uuid = row.try_get("id")?;
+        let intent_id_val: uuid::Uuid = row.try_get("intent_id")?;
+        let policy_id: Option<uuid::Uuid> = row.try_get("policy_id")?;
+        let action_type: String = row.try_get("action_type")?;
+        let proposed_json: serde_json::Value = row.try_get("proposed_action")?;
+        let execution_status: String = row.try_get("execution_status")?;
+        let reasoning_hash: Option<String> = row.try_get("reasoning_hash")?;
+        let created_at: DateTime<Utc> = row.try_get("created_at")?;
+        let wallet_address: String = row.try_get("wallet_address")?;
+
+        let Ok(proposal) = serde_json::from_value(proposed_json) else {
+            continue;
+        };
+
+        out.push(AgentExecutionLog {
+            id,
+            intent_id: intent_id_val,
+            policy_id,
+            wallet_address,
+            action_type,
+            proposal,
+            execution_status,
+            reasoning_hash: reasoning_hash.unwrap_or_default(),
+            created_at,
+        });
+    }
+    Ok(out)
+}
+
+// ── User settings ─────────────────────────────────────────────────────────────
+
+pub async fn persist_user_settings(
+    pool: Option<&PgPool>,
+    wallet_address: &str,
+    settings: &UserSettings,
+) -> anyhow::Result<()> {
+    let Some(pool) = pool else { return Ok(()); };
+
+    sqlx::query(r#"
+        INSERT INTO user_settings (wallet_address, settings, updated_at)
+        VALUES ($1, $2, NOW())
+        ON CONFLICT (wallet_address) DO UPDATE SET
+            settings   = EXCLUDED.settings,
+            updated_at = NOW()
+    "#)
+    .bind(wallet_address.to_lowercase())
+    .bind(serde_json::to_value(settings)?)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn load_user_settings(
+    pool: Option<&PgPool>,
+    wallet_address: &str,
+) -> anyhow::Result<Option<UserSettings>> {
+    use sqlx::Row;
+    let Some(pool) = pool else { return Ok(None); };
+
+    let row = sqlx::query(
+        "SELECT settings FROM user_settings WHERE wallet_address = LOWER($1)",
+    )
+    .bind(wallet_address)
+    .fetch_optional(pool)
+    .await?;
+
+    let Some(row) = row else { return Ok(None); };
+    let json: serde_json::Value = row.try_get("settings")?;
+    Ok(serde_json::from_value(json).ok())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -621,21 +1080,28 @@ mod tests {
             mantle_usdt_address: None,
             mantle_mnt_address: None,
             mantle_meth_address: None,
+            mantle_usdy_address: None,
+            mantle_wmnt_address: None,
+            mantle_weth_address: None,
+            mantle_cmeth_address: None,
             approved_strategy_address: None,
             approved_strategy_spender_address: None,
             strategy_deposit_function: "deposit(address,uint256)".to_string(),
             merchant_moe_strategy_address: None,
             merchant_moe_spender_address: None,
             merchant_moe_deposit_function: None,
-            lendle_strategy_address: None,
-            lendle_spender_address: None,
-            lendle_deposit_function: None,
             agni_strategy_address: None,
             agni_spender_address: None,
             agni_deposit_function: None,
+            fluxion_strategy_address: None,
+            fluxion_spender_address: None,
+            fluxion_deposit_function: None,
             meth_strategy_address: None,
             meth_spender_address: None,
             meth_deposit_function: None,
+            ondo_usdy_strategy_address: None,
+            ondo_usdy_spender_address: None,
+            ondo_usdy_deposit_function: None,
             arena_points_address: None,
             prediction_registry_address: None,
             identity_sbt_address: None,

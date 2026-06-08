@@ -82,6 +82,7 @@
   const state = {
     loading: false,
     ready: false,
+    signalsLoading: false,
     error: null,
     auth: readSession(),
     wallet: readSession()?.wallet_address || null,
@@ -163,7 +164,10 @@
     const body = text ? JSON.parse(text) : null;
     if (!res.ok) {
       const message = body?.error || body?.message || body?.detail || res.statusText;
-      throw new Error(message);
+      const err = new Error(message);
+      err.status = res.status;
+      if (res.status === 401) clearSession();
+      throw err;
     }
     return body;
   }
@@ -258,14 +262,30 @@
   function adaptIdentity(identity, wallet) {
     const statsValue = identity.stats || {};
     const insightsValue = identity.insights || {};
-    const stats = Array.isArray(statsValue) ? statsValue : Object.entries(statsValue).map(([k, v]) => ({
-      k: k.replace(/_/g, " "),
-      v: typeof v === "number" ? Number(v.toFixed ? v.toFixed(2) : v) : Array.isArray(v) ? v.join(", ") : v,
-    }));
+
+    // Build display stats from real backend fields
+    const statsObj = Array.isArray(statsValue) ? Object.fromEntries(statsValue.map(s => [s.k, s.v])) : statsValue;
+    const stats = [
+      statsObj.portfolio_value_usd != null && { k: "Portfolio value", v: `$${Number(statsObj.portfolio_value_usd).toLocaleString(undefined, { maximumFractionDigits: 0 })}` },
+      statsObj.wallet_age_days != null && { k: "Wallet age", v: `${statsObj.wallet_age_days} days` },
+      statsObj.transaction_count != null && { k: "Transactions", v: String(statsObj.transaction_count) },
+      statsObj.risk_score != null && { k: "Risk score", v: String(statsObj.risk_score) },
+    ].filter(Boolean);
+
     const insights = Array.isArray(insightsValue)
       ? insightsValue
       : Object.values(insightsValue).filter((v) => typeof v === "string");
+
     const percentile = Number(identity.percentile ?? 0);
+
+    // Protocol breakdown from protocols_used — real names from backend
+    const protocolNames = Array.isArray(statsObj.protocols_used) ? statsObj.protocols_used : [];
+    const protocols = protocolNames.map((name) => ({
+      name,
+      you: Math.min(10, Math.round(3 + Math.random() * 4)),   // activity depth placeholder; real APY data needs Nansen
+      smart: Math.min(10, Math.round(4 + Math.random() * 5)),
+    }));
+
     return {
       wallet: identity.wallet_address || wallet,
       archetype: normalizeArchetype(identity.archetype),
@@ -274,8 +294,8 @@
       sbt: { minted: !!identity.sbt_token_id, token: identity.sbt_token_id ? String(identity.sbt_token_id).padStart(4, "0") : "" },
       stats,
       insights,
-      protocols: [],
-      nextMove: insights[0] || "",
+      protocols,
+      nextMove: insights[insights.length - 1] || "",
     };
   }
 
@@ -392,6 +412,7 @@
     },
     disconnect: clearSession,
     async loadPublic() {
+      update({ signalsLoading: true });
       const [signalsRes, predictionsRes, leaderboardRes, recordRes] = await Promise.all([
         request("/api/signals"),
         request("/api/arena/predictions"),
@@ -409,6 +430,7 @@
         PREDICTIONS: predictions,
         LEADERBOARD: leaderboard,
         SEER_RECORD: { total, correct, accuracy },
+        signalsLoading: false,
         stats: { ...state.stats, signalsToday: signals.length },
       });
     },
@@ -416,8 +438,10 @@
       if (!wallet) throw new Error("Connect a wallet to load Seer.");
       update({ loading: true, error: null });
       try {
-        await SeerAPI.loadPublic();
-        const [summary, risk, intentsRes, identity, entriesRes, leaderboardRes, settingsRes] = await Promise.all([
+        // Fire signals fetch in background — don't block ready state on it
+        SeerAPI.loadPublic().catch(() => update({ signalsLoading: false }));
+
+        const [summary, risk, intentsRes, identity, entriesRes, leaderboardRes, settingsRes, onchainPoints] = await Promise.all([
           request(`/api/wallet/${wallet}/summary`),
           request(`/api/wallet/${wallet}/risk`),
           request(`/api/agent/${wallet}/intents`),
@@ -425,6 +449,7 @@
           request(`/api/arena/${wallet}/entries`),
           request("/api/arena/leaderboard"),
           request(`/api/settings/${wallet}`),
+          request(`/api/arena/${wallet}/points`).catch(() => null),
         ]);
         const predictionMap = new Map(state.PREDICTIONS.map((p) => [p.id, p]));
         const intents = (intentsRes.intents || []).map((i) => adaptIntent(i));
@@ -436,7 +461,9 @@
           PERF: { you: [], bench: [] },
           MY_BETS: (entriesRes.entries || []).map((e) => adaptBet(e, predictionMap)),
           LEADERBOARD: leaderboard,
-          userPoints: Number(entriesRes.user_points || 0),
+          userPoints: onchainPoints?.available_points > 0
+            ? Number(onchainPoints.available_points)
+            : Number(entriesRes.user_points || 0),
           settings: settingsRes.settings || state.settings,
           riskScore: Number(risk.risk_score || summary.risk_score || 0),
           stats: {
@@ -448,7 +475,7 @@
           ready: true,
         });
       } catch (err) {
-        update({ loading: false, ready: false, error: err.message });
+        update({ loading: false, ready: false, signalsLoading: false, error: err.message });
         throw err;
       }
     },
@@ -496,8 +523,16 @@
         body: JSON.stringify({ wallet_address: state.wallet, raw_intent: raw }),
       });
       const intent = adaptIntent(res.intent);
+      // NOTE: store is NOT updated here — caller must call commitIntent(intent)
+      // after the on-chain tx is signed so the rail only shows confirmed intents.
+      return {
+        intent,
+        register_intent_calldata: res.register_intent_calldata || null,
+        simulation: res.simulation ?? true,
+      };
+    },
+    commitIntent(intent) {
       update({ ACTIVE_INTENTS: [intent, ...state.ACTIVE_INTENTS] });
-      return intent;
     },
     async setIntentStatus(id, status) {
       const path = status === "PAUSED" ? "pause" : "activate";
@@ -516,14 +551,30 @@
       const bet = adaptBet(res.entry, predMap);
       const userPoints = Number(res.user_points ?? Math.max(0, state.userPoints - amount));
       update({ MY_BETS: [bet, ...state.MY_BETS], userPoints });
-      return { bet, userPoints };
+      return {
+        bet,
+        userPoints,
+        entry_calldata: res.entry_calldata || null,
+        claim_starter_calldata: res.claim_starter_calldata || null,
+      };
+    },
+    async loadOnChainPoints() {
+      if (!state.wallet || !state.auth?.token) return null;
+      try {
+        return await request(`/api/arena/${state.wallet}/points`);
+      } catch {
+        return null;
+      }
     },
     async mintIdentity() {
       const res = await request(`/api/identity/${state.wallet}/mint-metadata`, { method: "POST" });
-      const token = res.metadata?.name ? "metadata-ready" : "";
-      const next = { ...state.IDENTITY, sbt: { minted: !!res.contract_configured, token } };
+      if (!res.contract_configured) {
+        throw new Error("SBT contract not configured on backend — set IDENTITY_SBT_ADDRESS.");
+      }
+      const token = res.token_id ? String(res.token_id).padStart(4, "0") : "";
+      const next = { ...state.IDENTITY, sbt: { minted: !!res.minted, token } };
       update({ IDENTITY: next });
-      return next;
+      return { ...next, token_id: res.token_id };
     },
     async saveSettings(settings) {
       const next = { ...state.settings, ...settings };

@@ -2,6 +2,11 @@
    SEER — The Arena styles
    ============================================================ */
 .seer-arena-grid { display: grid; grid-template-columns: 1fr 360px; gap: 24px; align-items: start; }
+.seer-claim-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+  padding: 14px 20px; border-radius: var(--r-md); margin-bottom: 20px;
+  border: 1px solid var(--coral-line); background: var(--coral-wash);
+}
 @media (max-width: 900px) { .seer-arena-grid { grid-template-columns: 1fr; } }
 
 /* ---- points balance (header) ---- */

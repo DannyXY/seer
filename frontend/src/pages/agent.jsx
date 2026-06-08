@@ -5,7 +5,7 @@
    ============================================================ */
 
 /* ---------- Seer's living orb avatar ---------- */
-function SeerOrb({ size = 30, thinking = false }) {
+export function SeerOrb({ size = 30, thinking = false }) {
   return (
     <span className={"seer-orb" + (thinking ? " thinking" : "")} style={{ width: size, height: size }}>
       <span className="seer-orb-core" />
@@ -65,6 +65,10 @@ function ConfirmAgentCard({ card, onContinue, onEdit, onCancel, done }) {
           <span style={{ fontWeight: 600, fontSize: 13 }}>{card.chip.sym}</span>
           <span className="faint" style={{ fontSize: 11.5 }}>{card.chip.note}</span>
         </div>
+      </div>
+      <div className="seer-simulation-banner">
+        <span className="seer-simulation-badge">Simulation</span>
+        <span>Seer will plan and track this intent — but live execution isn't active yet. Intent hash is anchored on-chain via SeerIntentRegistry.</span>
       </div>
       {done ? (
         <div className="seer-confirm-done"><Icon name="check" size={15} style={{ color: "var(--c-opp)" }} />Deployed and running</div>

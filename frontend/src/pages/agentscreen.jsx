@@ -2,6 +2,8 @@
    SEER — My Agent screen: chat state machine + intents rail
    ============================================================ */
 import { useState, useRef, useEffect } from 'react';
+import { sendOnChainTx } from '../utils/onchain.js';
+import { SeerOrb } from './agent.jsx';
 
 const SEER_GREETING = {
   id: "m-greet", role: "seer",
@@ -61,13 +63,28 @@ export function AgentScreen({ showToast }) {
   const deploy = async (msgId, card) => {
     setBusy(true);
     try {
-      await window.SeerAPI.deployIntent(card);
-      setMessages((p) => p.map((m) => m.id === msgId ? { ...m, done: true } : m));
-      showToast("Agent deployed — Seer is on it.");
+      // 1. Persist to backend + get on-chain calldata — rail NOT updated yet
+      const result = await window.SeerAPI.deployIntent(card);
+
+      // 2. Sign the on-chain tx first — user must confirm before we show anything
+      if (result.register_intent_calldata) {
+        const hash = await sendOnChainTx(result.register_intent_calldata);
+        // 3. Tx signed — now commit to the rail and mark card done
+        window.SeerAPI.commitIntent(result.intent);
+        setMessages((p) => p.map((m) => m.id === msgId ? { ...m, done: true } : m));
+        showToast(`Intent anchored on-chain — tx: ${hash.slice(0, 10)}…`, 'success');
+      } else {
+        // Contract not configured — still commit, just without on-chain anchor
+        window.SeerAPI.commitIntent(result.intent);
+        setMessages((p) => p.map((m) => m.id === msgId ? { ...m, done: true } : m));
+        showToast("Agent deployed — Seer is on it.", 'success');
+      }
+
       const t1 = setTimeout(() => push({ role: "seer", text: ["It's live. I'll show each backend action in the trace. You can pause me whenever."] }), 500);
       timers.current.push(t1);
     } catch (err) {
-      showToast(err.message || "Deploy failed.");
+      // If the user rejected the tx or it failed, the card stays un-deployed
+      showToast(err.message || "Deploy failed — intent not added.", 'error');
     } finally {
       setBusy(false);
     }
@@ -213,7 +230,8 @@ function RailIntent({ intent, onTrace, onToggle }) {
         )}
       </div>
       <div style={{ fontSize: 13, fontWeight: 500, lineHeight: 1.35, marginBottom: 6 }}>{intent.summary}</div>
-      <div className="faint" style={{ fontSize: 11.5, marginBottom: 10 }}>{intent.lastAction} · {relTime(intent.lastTs)}</div>
+      <div className="faint" style={{ fontSize: 11.5, marginBottom: 8 }}>{intent.lastAction} · {relTime(intent.lastTs)}</div>
+      <div className="seer-simulation-badge" style={{ marginBottom: 10, display: 'inline-block' }}>Simulation — not live</div>
       <div className="row gap-6">
         <button className="seer-rail-btn" onClick={() => onTrace(intent)}>Trace</button>
         <button className="seer-rail-btn" onClick={() => onToggle(intent.id)}>{intent.status === "RUNNING" ? "Pause" : "Resume"}</button>

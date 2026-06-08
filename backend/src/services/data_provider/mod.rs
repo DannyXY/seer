@@ -245,10 +245,10 @@ impl NansenProvider {
         Ok(parse_defi_holdings_positions(&payload))
     }
 
-    async fn smart_money_holdings(&self) -> Result<Vec<SmartMoneyMovement>, DataProviderError> {
+    async fn smart_money_netflows(&self) -> Result<Vec<SmartMoneyMovement>, DataProviderError> {
         let payload = self
             .post_json(
-                "/smart-money/holdings",
+                "/smart-money/netflows",
                 json!({
                     "chains": self.smart_money_chains.clone(),
                     "pagination": {
@@ -257,20 +257,20 @@ impl NansenProvider {
                     },
                     "order_by": [
                         {
-                            "field": "value_usd",
+                            "field": "net_flow_24h_usd",
                             "direction": "DESC"
                         }
                     ]
                 }),
             )
             .await?;
-        Ok(parse_smart_money_holdings(&payload))
+        Ok(parse_smart_money_netflows(&payload))
     }
 
     async fn token_screener(&self) -> Result<Vec<SmartMoneyMovement>, DataProviderError> {
         let payload = self
             .post_json(
-                "/token-screener",
+                "/tgm/token-screener",
                 json!({
                     "chains": self.smart_money_chains.clone(),
                     "timeframe": "24h",
@@ -321,12 +321,7 @@ impl NansenProvider {
                 }),
             )
             .await?;
-        let mut flows = parse_tgm_flows(token, &payload);
-        if flows.is_empty() {
-            let holder_summary = self.tgm_holder_summary(token).await?;
-            flows.push(holder_summary);
-        }
-        Ok(flows)
+        Ok(parse_tgm_flows(token, &payload))
     }
 
     async fn tgm_holder_summary(&self, token: &str) -> Result<TokenFlow, DataProviderError> {
@@ -524,7 +519,7 @@ impl OnchainDataProvider for NansenProvider {
         &self,
         protocol: Option<&str>,
     ) -> Result<Vec<SmartMoneyMovement>, DataProviderError> {
-        let mut movements = self.smart_money_holdings().await?;
+        let mut movements = self.smart_money_netflows().await?;
         if movements.is_empty() {
             movements = self.token_screener().await?;
         }
@@ -554,10 +549,10 @@ fn parse_defi_holdings_positions(payload: &Value) -> Vec<PortfolioPosition> {
         .collect()
 }
 
-fn parse_smart_money_holdings(payload: &Value) -> Vec<SmartMoneyMovement> {
+fn parse_smart_money_netflows(payload: &Value) -> Vec<SmartMoneyMovement> {
     candidate_rows(payload)
         .into_iter()
-        .filter_map(smart_money_movement_from_value)
+        .filter_map(smart_money_netflow_from_value)
         .collect()
 }
 
@@ -825,6 +820,38 @@ fn smart_money_movement_from_value(value: &Value) -> Option<SmartMoneyMovement> 
         direction: "holding".to_string(),
         usd_value,
         confidence,
+        captured_at: Utc::now(),
+    })
+}
+
+fn smart_money_netflow_from_value(value: &Value) -> Option<SmartMoneyMovement> {
+    let asset = first_string(
+        value,
+        &[&["token_symbol"], &["symbol"], &["token_name"], &["name"]],
+    )?;
+    let protocol = first_string(value, &[&["chain"], &["network"]])
+        .unwrap_or_else(|| "mantle".to_string());
+    let net_flow = first_f64(
+        value,
+        &[
+            &["net_flow_24h_usd"],
+            &["net_flow_7d_usd"],
+            &["net_flow_1h_usd"],
+            &["net_flow_30d_usd"],
+        ],
+    )
+    .unwrap_or(0.0);
+    let trader_count = first_f64(value, &[&["trader_count"], &["wallet_count"]]).unwrap_or(1.0);
+    let direction = if net_flow >= 0.0 { "inflow" } else { "outflow" }.to_string();
+
+    Some(SmartMoneyMovement {
+        wallet: "nansen-smart-money".to_string(),
+        protocol,
+        asset,
+        source_provider: "nansen".to_string(),
+        direction,
+        usd_value: net_flow.abs(),
+        confidence: smart_money_confidence(net_flow.abs(), trader_count),
         captured_at: Utc::now(),
     })
 }
@@ -1235,7 +1262,7 @@ mod tests {
     use crate::{
         config::{AppRole, Settings},
         services::data_provider::{
-            parse_defi_holdings_positions, parse_smart_money_holdings, parse_tgm_flows,
+            parse_defi_holdings_positions, parse_smart_money_netflows, parse_tgm_flows,
             parse_tgm_holder_summary, parse_token_screener_movements,
             protocol_metrics_from_defillama, risk_score_from_positions, OnchainDataProvider,
             ProviderRegistry,
@@ -1276,21 +1303,28 @@ mod tests {
             mantle_usdt_address: None,
             mantle_mnt_address: None,
             mantle_meth_address: None,
+            mantle_usdy_address: None,
+            mantle_wmnt_address: None,
+            mantle_weth_address: None,
+            mantle_cmeth_address: None,
             approved_strategy_address: None,
             approved_strategy_spender_address: None,
             strategy_deposit_function: "deposit(address,uint256)".to_string(),
             merchant_moe_strategy_address: None,
             merchant_moe_spender_address: None,
             merchant_moe_deposit_function: None,
-            lendle_strategy_address: None,
-            lendle_spender_address: None,
-            lendle_deposit_function: None,
             agni_strategy_address: None,
             agni_spender_address: None,
             agni_deposit_function: None,
+            fluxion_strategy_address: None,
+            fluxion_spender_address: None,
+            fluxion_deposit_function: None,
             meth_strategy_address: None,
             meth_spender_address: None,
             meth_deposit_function: None,
+            ondo_usdy_strategy_address: None,
+            ondo_usdy_spender_address: None,
+            ondo_usdy_deposit_function: None,
             arena_points_address: None,
             prediction_registry_address: None,
             identity_sbt_address: None,
@@ -1359,34 +1393,32 @@ mod tests {
         let payload = json!({
             "data": [
                 {
-                    "token": {
-                        "symbol": "MNT",
-                        "chain": "mantle"
-                    },
-                    "entity_name": "Top Fund",
-                    "value_usd": 2500000.0,
-                    "smart_money_wallet_count": 12
+                    "token_symbol": "MNT",
+                    "chain": "mantle",
+                    "net_flow_24h_usd": 2500000.0,
+                    "trader_count": 12
                 },
                 {
                     "token_symbol": "mETH",
                     "chain": "mantle",
-                    "wallet_count": 8,
-                    "balance_usd": "750000"
+                    "net_flow_24h_usd": -750000.0,
+                    "trader_count": 8
                 }
             ]
         });
 
-        let movements = parse_smart_money_holdings(&payload);
+        let movements = parse_smart_money_netflows(&payload);
 
         assert_eq!(movements.len(), 2);
         assert_eq!(movements[0].asset, "MNT");
-        assert_eq!(movements[0].wallet, "Top Fund");
+        assert_eq!(movements[0].wallet, "nansen-smart-money");
         assert_eq!(movements[0].protocol, "mantle");
         assert_eq!(movements[0].source_provider, "nansen");
-        assert_eq!(movements[0].direction, "holding");
+        assert_eq!(movements[0].direction, "inflow");
         assert!(movements[0].confidence >= 70);
         assert_eq!(movements[1].asset, "mETH");
         assert_eq!(movements[1].usd_value, 750000.0);
+        assert_eq!(movements[1].direction, "outflow");
     }
 
     #[test]

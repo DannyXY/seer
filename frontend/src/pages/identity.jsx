@@ -1,7 +1,8 @@
 /* ============================================================
    SEER — My Identity: oracle card + analysis + share
    ============================================================ */
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { drawIdentityCard } from '../components/cardrender.jsx';
 
 function IdentityCardCanvas({ archKey, data, onReady, display = 340 }) {
   const ref = useRef(null);
@@ -14,7 +15,7 @@ function IdentityCardCanvas({ archKey, data, onReady, display = 340 }) {
       const DPR = 2.4;
       cv.width = 360 * DPR; cv.height = 520 * DPR;
       const ctx = cv.getContext("2d");
-      window.drawIdentityCard(ctx, DPR, archKey, data);
+      drawIdentityCard(ctx, DPR, archKey, data);
       onReady && onReady(cv);
     };
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw); else draw();
@@ -89,10 +90,10 @@ export function IdentityScreen({ showToast }) {
   const mint = async () => {
     setMinting(true);
     try {
-      const identity = await window.SeerAPI.mintIdentity();
-      showToast(identity.sbt.minted ? "Identity mint metadata ready." : "Mint metadata prepared; contract not configured yet.");
+      const result = await window.SeerAPI.mintIdentity();
+      showToast(result.token_id ? `Identity minted — Token #${result.token_id}` : "Identity minted.", 'success');
     } catch (err) {
-      showToast(err.message || "Mint failed.");
+      showToast(err.message || "Mint failed.", 'error');
     } finally {
       setMinting(false);
     }

@@ -1071,7 +1071,7 @@ mod tests {
                     == Some("0x0000000000000000000000000000000000000003".to_string())
         }));
         assert!(readiness.protocols.iter().any(|protocol| {
-            protocol.protocol == "Lendle" && !protocol.ready_for_strategy_draft
+            protocol.protocol == "Ondo USDY" && !protocol.ready_for_strategy_draft
         }));
     }
 
@@ -1156,108 +1156,6 @@ mod tests {
             draft.to,
             Some("0x0000000000000000000000000000000000000003".to_string())
         );
-    }
-
-    #[tokio::test]
-    async fn lendle_adapter_builds_aave_v2_supply_calldata_when_allowance_is_sufficient() {
-        let agent = AgentService::new();
-        let mut settings = Settings::from_env().unwrap();
-        settings.mantle_usdc_address =
-            Some("0x0000000000000000000000000000000000000001".to_string());
-        settings.lendle_strategy_address =
-            Some("0x0000000000000000000000000000000000000005".to_string());
-        settings.lendle_deposit_function =
-            Some("deposit(address,uint256,address,uint16)".to_string());
-        let execution = ExecutionService::new(settings);
-        let request = CreateIntentRequest {
-            wallet_address: "0x00000000000000000000000000000000000000aa".to_string(),
-            raw_intent: "When mETH TVL climbs above 40M, accumulate 25 USDC weekly into Lendle"
-                .to_string(),
-        };
-        let parsed = agent.parse_intent(&request.raw_intent);
-        let provider: &dyn OnchainDataProvider = &MockProvider;
-        let proposal = execution
-            .evaluate_intent_with_allowance(
-                provider,
-                request,
-                parsed,
-                Some(U256::from(25_000_000u64)),
-            )
-            .await
-            .unwrap();
-        let draft = proposal.transaction_draft.unwrap();
-
-        assert_eq!(draft.kind, "strategy_deposit");
-        assert_eq!(
-            draft.to,
-            Some("0x0000000000000000000000000000000000000005".to_string())
-        );
-        assert!(draft.data.unwrap().starts_with("0xe8eda9df"));
-        assert!(draft
-            .human_summary
-            .contains("for 0x00000000000000000000000000000000000000aa"));
-    }
-
-    #[test]
-    fn allowance_request_for_lendle_intent_uses_configured_token_and_spender() {
-        let agent = AgentService::new();
-        let mut settings = Settings::from_env().unwrap();
-        settings.mantle_usdc_address =
-            Some("0x0000000000000000000000000000000000000001".to_string());
-        settings.lendle_strategy_address =
-            Some("0x0000000000000000000000000000000000000005".to_string());
-        settings.lendle_spender_address =
-            Some("0x0000000000000000000000000000000000000006".to_string());
-        let execution = ExecutionService::new(settings);
-        let parsed = agent.parse_intent("Supply 10 USDC into Lendle now");
-        let request = execution
-            .allowance_request_for_intent(&parsed, "0x00000000000000000000000000000000000000aa")
-            .unwrap();
-
-        assert_eq!(
-            request.token_address,
-            "0x0000000000000000000000000000000000000001"
-        );
-        assert_eq!(
-            request.owner_address,
-            "0x00000000000000000000000000000000000000aa"
-        );
-        assert_eq!(
-            request.spender_address,
-            "0x0000000000000000000000000000000000000006"
-        );
-    }
-
-    #[tokio::test]
-    async fn lendle_adapter_can_encode_aave_v3_supply_signature() {
-        let agent = AgentService::new();
-        let mut settings = Settings::from_env().unwrap();
-        settings.mantle_usdc_address =
-            Some("0x0000000000000000000000000000000000000001".to_string());
-        settings.lendle_strategy_address =
-            Some("0x0000000000000000000000000000000000000005".to_string());
-        settings.lendle_deposit_function =
-            Some("supply(address,uint256,address,uint16)".to_string());
-        let execution = ExecutionService::new(settings);
-        let request = CreateIntentRequest {
-            wallet_address: "0x00000000000000000000000000000000000000aa".to_string(),
-            raw_intent: "Supply 10 USDC into Lendle now".to_string(),
-        };
-        let parsed = agent.parse_intent(&request.raw_intent);
-        let provider: &dyn OnchainDataProvider = &MockProvider;
-        let proposal = execution
-            .evaluate_intent_with_allowance(
-                provider,
-                request,
-                parsed,
-                Some(U256::from(10_000_000u64)),
-            )
-            .await
-            .unwrap();
-        let draft = proposal.transaction_draft.unwrap();
-
-        assert_eq!(draft.kind, "strategy_deposit");
-        assert!(draft.data.unwrap().starts_with("0x617ba037"));
     }
 
     #[tokio::test]

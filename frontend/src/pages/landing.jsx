@@ -219,11 +219,15 @@ const SURFACES = [
   { n: "04", c: "#F7A833", nm: "On-chain Identity", ds: "Every call you make and move you mirror builds a portable, provable record of what you've gotten right." },
 ];
 
-export default function Landing({ onEnter }) {
+export default function Landing({ onEnter, isAuthenticated }) {
   const seer = window.useSeerStore();
   const [modal, setModal] = useState(false);
   const S = seer.stats;
   useReveal();
+
+  // If already signed in, skip the modal entirely and go straight in
+  const handleEnter = isAuthenticated ? onEnter : () => setModal(true);
+
   return (
     <div className="sl">
       {/* nav */}
@@ -231,11 +235,13 @@ export default function Landing({ onEnter }) {
         <div className="sl-wrap sl-nav-in">
           <div className="sl-brand"><PrismMark size={26} /><span className="wm">SEER</span></div>
           <div className="sl-nav-links">
-            <a onClick={() => setModal(true)}>Signals</a><a onClick={() => setModal(true)}>Agent</a><a onClick={() => setModal(true)}>Arena</a><a onClick={() => setModal(true)}>Identity</a>
+            <a onClick={handleEnter}>Signals</a><a onClick={handleEnter}>Agent</a><a onClick={handleEnter}>Arena</a><a onClick={handleEnter}>Identity</a>
           </div>
           <div className="sl-nav-right">
             <span className="pill"><span className="dot live" style={{ background: "var(--volt)" }} />Mantle</span>
-            <button className="btn btn-primary" onClick={() => setModal(true)}>Connect<Icon name="arrow" size={15} /></button>
+            <button className="btn btn-primary" onClick={handleEnter}>
+              {isAuthenticated ? "Enter app" : "Connect"}<Icon name="arrow" size={15} />
+            </button>
           </div>
         </div>
       </nav>
@@ -248,8 +254,8 @@ export default function Landing({ onEnter }) {
             <h1 className="sl-hero-h1">See<br /><em>before</em><br />they do.</h1>
             <p className="sl-hero-sub">Seer reads Mantle the moment patterns form — then turns the noise into <b>signal you can act on in one click.</b> An instrument, not another dashboard.</p>
             <div className="sl-hero-cta">
-              <button className="btn btn-primary" style={{ padding: "14px 22px", fontSize: 15 }} onClick={() => setModal(true)}>Connect Wallet<Icon name="arrow" size={17} /></button>
-              <button className="btn btn-ghost" style={{ padding: "14px 18px", fontSize: 15 }} onClick={() => setModal(true)}>Enter app</button>
+              <button className="btn btn-primary" style={{ padding: "14px 22px", fontSize: 15 }} onClick={handleEnter}>{isAuthenticated ? "Enter app" : "Connect Wallet"}<Icon name="arrow" size={17} /></button>
+              {!isAuthenticated && <button className="btn btn-ghost" style={{ padding: "14px 18px", fontSize: 15 }} onClick={handleEnter}>Enter app</button>}
             </div>
             <div className="sl-reassure">// no sign-up · no email · just your wallet</div>
           </div>
@@ -368,8 +374,8 @@ export default function Landing({ onEnter }) {
           <PrismMark size={64} style={{ margin: "0 auto", filter: "drop-shadow(0 0 36px rgba(200,242,48,0.14))" }} />
           <h2>The market is talking.<br /><em>Seer is listening.</em></h2>
           <div className="sl-close-cta">
-            <button className="btn btn-primary" style={{ padding: "15px 26px", fontSize: 16 }} onClick={() => setModal(true)}>Connect Wallet<Icon name="arrow" size={17} /></button>
-            <button className="btn btn-ghost" style={{ padding: "15px 22px", fontSize: 16 }} onClick={() => setModal(true)}>Enter app</button>
+            <button className="btn btn-primary" style={{ padding: "15px 26px", fontSize: 16 }} onClick={handleEnter}>{isAuthenticated ? "Enter app" : "Connect Wallet"}<Icon name="arrow" size={17} /></button>
+            {!isAuthenticated && <button className="btn btn-ghost" style={{ padding: "15px 22px", fontSize: 16 }} onClick={handleEnter}>Enter app</button>}
           </div>
         </section>
 

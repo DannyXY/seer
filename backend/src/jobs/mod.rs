@@ -27,10 +27,10 @@ pub async fn run_worker(state: AppState) -> anyhow::Result<()> {
 }
 
 async fn run_scheduler(state: AppState) {
-    let mut fast_tick = interval(std::time::Duration::from_secs(30));
-    let mut arena_tick = interval(std::time::Duration::from_secs(300));
-    let mut prediction_tick = interval(std::time::Duration::from_secs(900));
-    let mut cohort_tick = interval(std::time::Duration::from_secs(3600));
+    let mut fast_tick = interval(std::time::Duration::from_secs(3_600));   // 1 hour
+    let mut arena_tick = interval(std::time::Duration::from_secs(3_600));   // 1 hour
+    let mut prediction_tick = interval(std::time::Duration::from_secs(7_200)); // 2 hours
+    let mut cohort_tick = interval(std::time::Duration::from_secs(14_400));  // 4 hours
 
     fast_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     arena_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -299,21 +299,28 @@ mod tests {
             mantle_usdt_address: None,
             mantle_mnt_address: None,
             mantle_meth_address: None,
+            mantle_usdy_address: None,
+            mantle_wmnt_address: None,
+            mantle_weth_address: None,
+            mantle_cmeth_address: None,
             approved_strategy_address: None,
             approved_strategy_spender_address: None,
             strategy_deposit_function: "deposit(address,uint256)".to_string(),
             merchant_moe_strategy_address: None,
             merchant_moe_spender_address: None,
             merchant_moe_deposit_function: None,
-            lendle_strategy_address: None,
-            lendle_spender_address: None,
-            lendle_deposit_function: None,
             agni_strategy_address: None,
             agni_spender_address: None,
             agni_deposit_function: None,
+            fluxion_strategy_address: None,
+            fluxion_spender_address: None,
+            fluxion_deposit_function: None,
             meth_strategy_address: Some("0x0000000000000000000000000000000000000002".to_string()),
             meth_spender_address: None,
             meth_deposit_function: None,
+            ondo_usdy_strategy_address: None,
+            ondo_usdy_spender_address: None,
+            ondo_usdy_deposit_function: None,
             arena_points_address: None,
             prediction_registry_address: None,
             identity_sbt_address: None,

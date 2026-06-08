@@ -169,5 +169,4 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-window.drawIdentityCard = drawIdentityCard;
-window.ARCH_HEX = ARCH_HEX;
+export { drawIdentityCard, ARCH_HEX };

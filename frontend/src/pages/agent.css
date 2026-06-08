@@ -117,12 +117,12 @@
 .seer-confirm-title { font-size: 21px; font-weight: 500; margin-bottom: 14px; line-height: 1.15; }
 .seer-confirm-rows { display: flex; flex-direction: column; }
 .seer-confirm-row {
-  display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  padding: 10px 0; border-bottom: 1px solid var(--line-soft);
+  display: grid; grid-template-columns: 90px 1fr; align-items: baseline; gap: 12px;
+  padding: 9px 0; border-bottom: 1px solid var(--line-soft);
 }
 .seer-confirm-row:first-child { padding-top: 0; }
-.seer-confirm-k { font-size: 13px; color: var(--ink-2); flex-shrink: 0; white-space: nowrap; }
-.seer-confirm-v { font-size: 13px; font-weight: 500; text-align: right; display: inline-flex; align-items: center; gap: 7px; justify-content: flex-end; white-space: nowrap; }
+.seer-confirm-k { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
+.seer-confirm-v { font-size: 12.5px; font-weight: 500; display: inline-flex; align-items: center; gap: 7px; flex-wrap: wrap; word-break: break-word; }
 .seer-tok-mini {
   display: inline-flex; align-items: center; justify-content: center;
   width: 18px; height: 18px; border-radius: 99px; border: 1px solid; font-size: 11px; font-family: var(--font-mono);
@@ -136,6 +136,21 @@
 .seer-confirm-done {
   display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 16px;
   padding: 11px; border-radius: var(--r-sm); background: var(--c-opp-wash); color: var(--ink); font-size: 13.5px; font-weight: 500;
+}
+
+/* ---- simulation caveat ---- */
+.seer-simulation-banner {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 9px 12px; border-radius: var(--r-sm);
+  background: rgba(247,168,51,0.10); border: 1px solid rgba(247,168,51,0.30);
+  font-size: 11.5px; color: var(--c-risk); line-height: 1.45;
+}
+.seer-simulation-badge {
+  font-family: var(--font-mono); font-size: 9.5px; font-weight: 700;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  padding: 2px 6px; border-radius: var(--r-xs);
+  background: rgba(247,168,51,0.18); color: var(--c-risk);
+  flex-shrink: 0; white-space: nowrap;
 }
 
 /* ---- composer ---- */

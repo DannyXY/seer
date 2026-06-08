@@ -1,8 +1,9 @@
 use ethers_core::{
     abi::{encode, Token},
-    types::Address,
+    types::{transaction::eip2718::TypedTransaction, Address, Bytes, TransactionRequest, U256},
     utils::id,
 };
+use ethers::signers::{LocalWallet, Signer};
 use serde_json::{json, Value};
 use std::str::FromStr;
 
@@ -13,9 +14,11 @@ use crate::models::execution::{
     SimulateTransactionRequest, SimulateTransactionResponse, UserOperationReceiptRequest,
 };
 
+#[derive(Clone)]
 pub struct ContractService {
     pub rpc_url: Option<String>,
     pub private_key: Option<String>,
+    pub chain_id: u64,
     pub arena_points_address: Option<String>,
     pub prediction_registry_address: Option<String>,
     pub identity_sbt_address: Option<String>,
@@ -32,6 +35,7 @@ impl ContractService {
         Self {
             rpc_url: settings.mantle_rpc_url,
             private_key: settings.backend_signer_private_key,
+            chain_id: settings.mantle_chain_id,
             arena_points_address: settings.arena_points_address,
             prediction_registry_address: settings.prediction_registry_address,
             identity_sbt_address: settings.identity_sbt_address,
@@ -292,6 +296,292 @@ impl ContractService {
         })
     }
 
+    // ── Intent Registry helpers ──────────────────────────────────────────────
+
+    /// Returns (to, calldata) for user to sign `SeerIntentRegistry.registerIntent(bytes32, string)`.
+    /// `intent_hash_hex` must be a 32-byte hex string (with or without 0x prefix).
+    pub fn register_intent_calldata(&self, intent_hash_hex: &str, metadata_uri: &str) -> Option<(String, String)> {
+        let to = self.intent_registry_address.clone()?;
+        let bytes = ethers_core::utils::hex::decode(intent_hash_hex.trim_start_matches("0x")).ok()?;
+        if bytes.len() != 32 { return None; }
+        let mut fixed = [0u8; 32];
+        fixed.copy_from_slice(&bytes);
+        let mut data = id("registerIntent(bytes32,string)")[..4].to_vec();
+        data.extend(encode(&[
+            Token::FixedBytes(fixed.to_vec()),
+            Token::String(metadata_uri.to_string()),
+        ]));
+        Some((to, format!("0x{}", hex_encode(&data))))
+    }
+
+    /// Fetch all IntentRegistered events for a wallet from SeerIntentRegistry.
+    /// Returns (onchain_intent_id, intent_hash_hex) pairs, newest first.
+    pub async fn get_registered_intents_onchain(&self, wallet: &str) -> anyhow::Result<Vec<(u64, String)>> {
+        let rpc_url = self.rpc_url.as_ref().ok_or_else(|| anyhow::anyhow!("MANTLE_RPC_URL not configured"))?;
+        let to = self.intent_registry_address.as_ref().ok_or_else(|| anyhow::anyhow!("INTENT_REGISTRY_ADDRESS not configured"))?;
+
+        // IntentRegistered(uint256 indexed intentId, address indexed user, bytes32 intentHash)
+        let topic0 = format!("0x{}", hex_encode(&ethers_core::utils::keccak256(
+            b"IntentRegistered(uint256,address,bytes32)"
+        )));
+        // Pad wallet address to 32 bytes (topic encoding for indexed address)
+        let wallet_clean = wallet.trim_start_matches("0x").to_lowercase();
+        let topic2 = format!("0x{:0>64}", wallet_clean);
+
+        let response = self.rpc_call(rpc_url, "eth_getLogs", serde_json::json!([{
+            "address": to,
+            "topics": [topic0, null, topic2],
+            "fromBlock": "0x0",
+            "toBlock": "latest",
+        }])).await?;
+
+        let empty = vec![];
+        let logs = response.get("result").and_then(Value::as_array).unwrap_or(&empty);
+
+        let mut results: Vec<(u64, String)> = logs.iter().rev().filter_map(|log| {
+            let topics = log.get("topics").and_then(Value::as_array)?;
+            let id_hex = topics.get(1).and_then(Value::as_str)?;
+            let hash_bytes_raw = log.get("data").and_then(Value::as_str).unwrap_or("0x");
+            let id_bytes = ethers_core::utils::hex::decode(id_hex.trim_start_matches("0x")).ok()?;
+            let intent_id = U256::from_big_endian(&id_bytes).min(U256::from(u64::MAX)).as_u64();
+            // intentHash is the non-indexed bytes32 — it's in the log data field
+            let hash_hex = hash_bytes_raw.trim_start_matches("0x");
+            Some((intent_id, hash_hex.to_string()))
+        }).collect();
+
+        Ok(results)
+    }
+
+    // ── Identity SBT helpers ─────────────────────────────────────────────────
+
+    /// Read `SeerIdentitySBT.tokenOfOwner(wallet)` — returns 0 if not minted.
+    pub async fn identity_token_of_owner(&self, wallet: &str) -> anyhow::Result<u64> {
+        let rpc_url = self.rpc_url.as_ref().ok_or_else(|| anyhow::anyhow!("MANTLE_RPC_URL not configured"))?;
+        let to = self.identity_sbt_address.as_ref().ok_or_else(|| anyhow::anyhow!("IDENTITY_SBT_ADDRESS not configured"))?;
+        let addr = Address::from_str(wallet).map_err(|e| anyhow::anyhow!("bad wallet address: {e}"))?;
+        let mut data = id("tokenOfOwner(address)")[..4].to_vec();
+        data.extend(encode(&[Token::Address(addr)]));
+        let result = self.eth_call(rpc_url, to, &data).await?;
+        Ok(u256_from_return_data(&result).min(U256::from(u64::MAX)).as_u64())
+    }
+
+    /// Backend-signed: call `SeerIdentitySBT.mintIdentity(user, uri)`.
+    /// Returns the minted token ID.
+    pub async fn mint_identity_on_chain(&self, user: &str, uri: &str) -> anyhow::Result<u64> {
+        let to = self.identity_sbt_address.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("IDENTITY_SBT_ADDRESS not configured"))?;
+        let to_addr = Address::from_str(to)?;
+        let user_addr = Address::from_str(user)?;
+
+        let mut calldata = id("mintIdentity(address,string)")[..4].to_vec();
+        calldata.extend(encode(&[
+            Token::Address(user_addr),
+            Token::String(uri.to_string()),
+        ]));
+
+        let tx_hash = self.sign_and_send_tx(to_addr, calldata).await?;
+        let token_id = self.wait_for_identity_minted(&tx_hash).await?;
+        Ok(token_id)
+    }
+
+    /// Poll for receipt and extract IdentityMinted(user, tokenId, uri) event.
+    async fn wait_for_identity_minted(&self, tx_hash: &str) -> anyhow::Result<u64> {
+        let rpc_url = self.rpc_url.as_ref().ok_or_else(|| anyhow::anyhow!("no rpc"))?;
+        let event_sig = "IdentityMinted(address,uint256,string)";
+        let topic0 = format!("0x{}", hex_encode(&ethers_core::utils::keccak256(event_sig.as_bytes())));
+
+        for _ in 0..30 {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            let response = self.rpc_call(rpc_url, "eth_getTransactionReceipt", json!([tx_hash])).await?;
+            let Some(receipt) = response.get("result").filter(|v| !v.is_null()) else {
+                continue;
+            };
+            if receipt.get("status").and_then(Value::as_str) == Some("0x0") {
+                anyhow::bail!("mintIdentity transaction reverted");
+            }
+            let empty_logs = vec![];
+            let logs = receipt.get("logs").and_then(Value::as_array).unwrap_or(&empty_logs);
+            for log in logs {
+                let empty_topics = vec![];
+                let topics = log.get("topics").and_then(Value::as_array).unwrap_or(&empty_topics);
+                if topics.first().and_then(Value::as_str) == Some(&topic0) {
+                    if let Some(id_hex) = topics.get(2).and_then(Value::as_str) {
+                        let id_bytes = ethers_core::utils::hex::decode(id_hex.trim_start_matches("0x")).unwrap_or_default();
+                        let id_val = U256::from_big_endian(&id_bytes);
+                        return Ok(id_val.min(U256::from(u64::MAX)).as_u64());
+                    }
+                }
+            }
+            break;
+        }
+        anyhow::bail!("timed out waiting for IdentityMinted event in tx {tx_hash}")
+    }
+
+    // ── Arena contract helpers ────────────────────────────────────────────────
+
+    /// Returns (to, calldata) for user to sign `SeerArenaPoints.claimStarterPoints()`.
+    pub fn claim_starter_points_calldata(&self) -> Option<(String, String)> {
+        let to = self.arena_points_address.clone()?;
+        let calldata = format!("0x{}", hex_encode(&id("claimStarterPoints()")[..4]));
+        Some((to, calldata))
+    }
+
+    /// Returns (to, calldata) for user to sign `SeerPredictionRegistry.enterPrediction()`.
+    pub fn enter_prediction_calldata(&self, onchain_id: u64, position: u8, amount: u64) -> Option<(String, String)> {
+        let to = self.prediction_registry_address.clone()?;
+        let mut data = id("enterPrediction(uint256,uint8,uint256)")[..4].to_vec();
+        data.extend(encode(&[
+            Token::Uint(U256::from(onchain_id)),
+            Token::Uint(U256::from(position)),
+            Token::Uint(U256::from(amount)),
+        ]));
+        Some((to, format!("0x{}", hex_encode(&data))))
+    }
+
+    /// Read `SeerArenaPoints.getAvailablePoints(wallet)` via eth_call.
+    pub async fn read_available_points(&self, wallet: &str) -> anyhow::Result<u64> {
+        let rpc_url = self.rpc_url.as_ref().ok_or_else(|| anyhow::anyhow!("MANTLE_RPC_URL not configured"))?;
+        let to = self.arena_points_address.as_ref().ok_or_else(|| anyhow::anyhow!("SEER_ARENA_POINTS_ADDRESS not configured"))?;
+        let addr = Address::from_str(wallet).map_err(|e| anyhow::anyhow!("bad wallet address: {e}"))?;
+        let mut data = id("getAvailablePoints(address)")[..4].to_vec();
+        data.extend(encode(&[Token::Address(addr)]));
+        let result = self.eth_call(rpc_url, to, &data).await?;
+        Ok(u256_from_return_data(&result).min(U256::from(u64::MAX)).as_u64())
+    }
+
+    /// Check `SeerArenaPoints.claimedStarterPoints(wallet)` via eth_call.
+    pub async fn has_claimed_starter_points(&self, wallet: &str) -> anyhow::Result<bool> {
+        let rpc_url = self.rpc_url.as_ref().ok_or_else(|| anyhow::anyhow!("MANTLE_RPC_URL not configured"))?;
+        let to = self.arena_points_address.as_ref().ok_or_else(|| anyhow::anyhow!("SEER_ARENA_POINTS_ADDRESS not configured"))?;
+        let addr = Address::from_str(wallet).map_err(|e| anyhow::anyhow!("bad wallet address: {e}"))?;
+        let mut data = id("claimedStarterPoints(address)")[..4].to_vec();
+        data.extend(encode(&[Token::Address(addr)]));
+        let result = self.eth_call(rpc_url, to, &data).await?;
+        let bytes = ethers_core::utils::hex::decode(result.trim_start_matches("0x")).unwrap_or_default();
+        Ok(bytes.last().copied().unwrap_or(0) != 0)
+    }
+
+    /// Backend-signed: call `SeerPredictionRegistry.createPrediction()`, return on-chain prediction ID.
+    pub async fn create_prediction_on_chain(
+        &self,
+        claim: &str,
+        data_key: [u8; 32],
+        target_value: u64,
+        expiry_unix: u64,
+        comparison_op: u8,  // 0 = Gte, 1 = Lte
+        seer_position: u8,  // 0 = BackSeer, 1 = ChallengeSeer
+    ) -> anyhow::Result<u64> {
+        let to = self.prediction_registry_address.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("SEER_PREDICTION_REGISTRY_ADDRESS not configured"))?;
+        let to_addr = Address::from_str(to)?;
+
+        let mut calldata = id("createPrediction(string,bytes32,uint256,uint256,uint8,uint8)")[..4].to_vec();
+        calldata.extend(encode(&[
+            Token::String(claim.to_string()),
+            Token::FixedBytes(data_key.to_vec()),
+            Token::Uint(U256::from(target_value)),
+            Token::Uint(U256::from(expiry_unix)),
+            Token::Uint(U256::from(comparison_op)),
+            Token::Uint(U256::from(seer_position)),
+        ]));
+
+        let tx_hash = self.sign_and_send_tx(to_addr, calldata).await?;
+        let prediction_id = self.wait_for_prediction_id(&tx_hash).await?;
+        Ok(prediction_id)
+    }
+
+    /// Sign and send a backend-authorized transaction. Returns tx hash.
+    async fn sign_and_send_tx(&self, to: Address, calldata: Vec<u8>) -> anyhow::Result<String> {
+        let rpc_url = self.rpc_url.as_ref().ok_or_else(|| anyhow::anyhow!("MANTLE_RPC_URL not configured"))?;
+        let private_key = self.private_key.as_ref().ok_or_else(|| anyhow::anyhow!("BACKEND_SIGNER_PRIVATE_KEY not configured"))?;
+
+        let wallet: LocalWallet = private_key.parse::<LocalWallet>()?.with_chain_id(self.chain_id);
+        let from = wallet.address();
+
+        let nonce = self.get_nonce(rpc_url, &format!("{from:?}")).await?;
+        let gas_price = self.get_gas_price(rpc_url).await?;
+
+        let tx = TransactionRequest::new()
+            .to(to)
+            .from(from)
+            .data(Bytes::from(calldata))
+            .gas(500_000u64)
+            .gas_price(gas_price)
+            .nonce(nonce)
+            .chain_id(self.chain_id);
+
+        let typed: TypedTransaction = tx.into();
+        let sig = wallet.sign_transaction(&typed).await?;
+        let rlp_bytes = typed.rlp_signed(&sig);
+        let hex = format!("0x{}", hex_encode(&rlp_bytes));
+
+        let response = self.rpc_call(rpc_url, "eth_sendRawTransaction", json!([hex])).await?;
+        if let Some(err) = response.get("error") {
+            anyhow::bail!("rpc error sending tx: {err}");
+        }
+        let tx_hash = response.get("result").and_then(Value::as_str)
+            .ok_or_else(|| anyhow::anyhow!("eth_sendRawTransaction missing result"))?;
+        Ok(tx_hash.to_string())
+    }
+
+    /// Poll for a receipt and extract the PredictionCreated event's predictionId.
+    async fn wait_for_prediction_id(&self, tx_hash: &str) -> anyhow::Result<u64> {
+        let rpc_url = self.rpc_url.as_ref().ok_or_else(|| anyhow::anyhow!("no rpc"))?;
+        // PredictionCreated(uint256 indexed predictionId, bytes32 dataKey, uint256 expiryTime)
+        let event_sig = "PredictionCreated(uint256,bytes32,uint256)";
+        let topic0 = format!("0x{}", hex_encode(&ethers_core::utils::keccak256(event_sig.as_bytes())));
+
+        for _ in 0..30 {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            let response = self.rpc_call(rpc_url, "eth_getTransactionReceipt", json!([tx_hash])).await?;
+            let Some(receipt) = response.get("result").filter(|v| !v.is_null()) else {
+                continue;
+            };
+            let empty_logs = vec![];
+            let logs = receipt.get("logs").and_then(Value::as_array).unwrap_or(&empty_logs);
+            for log in logs {
+                let empty_topics = vec![];
+                let topics = log.get("topics").and_then(Value::as_array).unwrap_or(&empty_topics);
+                if topics.first().and_then(Value::as_str) == Some(&topic0) {
+                    if let Some(id_hex) = topics.get(1).and_then(Value::as_str) {
+                        let id_bytes = ethers_core::utils::hex::decode(id_hex.trim_start_matches("0x")).unwrap_or_default();
+                        let id_val = U256::from_big_endian(&id_bytes);
+                        return Ok(id_val.min(U256::from(u64::MAX)).as_u64());
+                    }
+                }
+            }
+            // Receipt found but no matching log — tx reverted or wrong contract
+            if receipt.get("status").and_then(Value::as_str) == Some("0x0") {
+                anyhow::bail!("createPrediction transaction reverted");
+            }
+            break;
+        }
+        anyhow::bail!("timed out waiting for PredictionCreated event in tx {tx_hash}")
+    }
+
+    async fn eth_call(&self, rpc_url: &str, to: &str, calldata: &[u8]) -> anyhow::Result<String> {
+        let response = self.rpc_call(rpc_url, "eth_call", json!([{
+            "to": to,
+            "data": format!("0x{}", hex_encode(calldata)),
+        }, "latest"])).await?;
+        if let Some(err) = response.get("error") {
+            anyhow::bail!("eth_call error: {err}");
+        }
+        Ok(response.get("result").and_then(Value::as_str).unwrap_or("0x").to_string())
+    }
+
+    async fn get_nonce(&self, rpc_url: &str, address: &str) -> anyhow::Result<U256> {
+        let response = self.rpc_call(rpc_url, "eth_getTransactionCount", json!([address, "pending"])).await?;
+        let hex = response.get("result").and_then(Value::as_str).unwrap_or("0x0");
+        Ok(U256::from_str_radix(hex.trim_start_matches("0x"), 16)?)
+    }
+
+    async fn get_gas_price(&self, rpc_url: &str) -> anyhow::Result<U256> {
+        let response = self.rpc_call(rpc_url, "eth_gasPrice", json!([])).await?;
+        let hex = response.get("result").and_then(Value::as_str).unwrap_or("0x3B9ACA00");
+        Ok(U256::from_str_radix(hex.trim_start_matches("0x"), 16)?)
+    }
+
     async fn rpc_call(&self, rpc_url: &str, method: &str, params: Value) -> anyhow::Result<Value> {
         let response = self
             .client
@@ -310,6 +600,12 @@ impl ContractService {
 
         Ok(response)
     }
+}
+
+fn u256_from_return_data(hex: &str) -> U256 {
+    let bytes = ethers_core::utils::hex::decode(hex.trim_start_matches("0x")).unwrap_or_default();
+    if bytes.len() < 32 { return U256::zero(); }
+    U256::from_big_endian(&bytes[bytes.len() - 32..])
 }
 
 fn validate_hex_address(value: &str, name: &str) -> anyhow::Result<()> {

@@ -43,6 +43,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/arena/predictions/:id", get(arena::prediction))
         .route("/api/arena/predictions/:id/enter", post(arena::enter))
         .route("/api/arena/:address/entries", get(arena::entries))
+        .route("/api/arena/:address/points", get(arena::on_chain_points))
         .route("/api/arena/leaderboard", get(arena::leaderboard))
         .route("/api/arena/seer-record", get(arena::seer_record))
         .route("/api/arena/resolve-due", post(arena::resolve_due))

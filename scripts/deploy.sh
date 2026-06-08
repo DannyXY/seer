@@ -44,6 +44,7 @@ deploy() {
   output=$(forge create \
     --rpc-url "$RPC_URL" \
     --private-key "$PRIVATE_KEY" \
+    --broadcast \
     "$contract" \
     ${@:+"--constructor-args" "$@"} \
     2>&1)

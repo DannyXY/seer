@@ -9,7 +9,10 @@ use uuid::Uuid;
 
 use crate::{
     api::auth_guard::require_wallet,
-    db::{persist_agent_execution_log, persist_agent_execution_policy, persist_agent_intent},
+    db::{
+        load_logs_for_intent, load_policies_for_wallet, persist_agent_execution_log,
+        persist_agent_execution_policy, persist_agent_intent,
+    },
     errors::ApiError,
     models::{
         agent::{
@@ -26,8 +29,10 @@ use crate::{
 
 pub async fn parse_intent(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<CreateIntentRequest>,
-) -> Json<Value> {
+) -> Result<Json<Value>, ApiError> {
+    require_wallet(&state, &headers, &req.wallet_address)?;
     let parsed = state.services.agent.parse_intent(&req.raw_intent);
     let explanation = state
         .services
@@ -35,9 +40,9 @@ pub async fn parse_intent(
         .parse_intent_explanation(&parsed)
         .await
         .unwrap_or_default();
-    Json(
+    Ok(Json(
         json!({ "wallet_address": req.wallet_address, "parsed_intent": parsed, "explanation": explanation }),
-    )
+    ))
 }
 
 pub async fn evaluate_intent(
@@ -211,10 +216,22 @@ pub async fn create_intent(
     persist_agent_execution_policy(state.services.infra.postgres.as_ref(), &policy)
         .await
         .map_err(|err| ApiError::Service(err.to_string()))?;
+
+    // Build calldata for user to anchor the intent on-chain via SeerIntentRegistry.
+    let metadata_uri = format!(
+        "data:application/json,{{\"intent\":{:?},\"wallet\":{:?}}}",
+        intent.raw_intent, intent.wallet_address
+    );
+    let register_calldata = state.services.contracts
+        .register_intent_calldata(&intent.intent_hash, &metadata_uri)
+        .map(|(to, data)| json!({ "to": to, "data": data, "chain_id": state.services.contracts.chain_id }));
+
     Ok(Json(json!({
         "intent": intent,
         "execution_policy_draft": policy,
-        "authorization_model": "user-approved or scoped delegated execution only"
+        "authorization_model": "user-approved or scoped delegated execution only",
+        "register_intent_calldata": register_calldata,
+        "simulation": true,
     })))
 }
 
@@ -304,6 +321,25 @@ pub async fn intents(
     Path(address): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     require_wallet(&state, &headers, &address)?;
+
+    // 1. Restore from DB on cache miss (e.g. after server restart)
+    if state.services.agent.list_intents(&address).is_empty() {
+        if let Ok(db_intents) = crate::db::load_intents_for_wallet(
+            state.services.infra.postgres.as_ref(), &address
+        ).await {
+            state.services.agent.seed_intents(db_intents);
+        }
+    }
+
+    // 2. Merge on-chain intent IDs so each intent knows its on-chain anchor
+    if state.services.contracts.rpc_configured() {
+        if let Ok(onchain) = state.services.contracts.get_registered_intents_onchain(&address).await {
+            for (onchain_id, hash_hex) in onchain {
+                state.services.agent.set_onchain_id_by_hash(&hash_hex, onchain_id);
+            }
+        }
+    }
+
     Ok(Json(json!({
         "wallet_address": address,
         "intents": state.services.agent.list_intents(&address)
@@ -321,6 +357,16 @@ pub async fn intent(
         .get_intent(intent_id)
         .ok_or(ApiError::NotFound)?;
     require_wallet(&state, &headers, &intent.wallet_address)?;
+
+    // Restore policies from DB on cache miss.
+    if state.services.agent.policies_for_intent(intent_id).is_empty() {
+        if let Ok(db_policies) = load_policies_for_wallet(
+            state.services.infra.postgres.as_ref(), &intent.wallet_address
+        ).await {
+            state.services.agent.seed_policies(db_policies);
+        }
+    }
+
     Ok(Json(json!({
         "intent": intent,
         "execution_policies": state.services.agent.policies_for_intent(intent_id)
@@ -338,6 +384,16 @@ pub async fn reasoning(
         .get_intent(intent_id)
         .ok_or(ApiError::NotFound)?;
     require_wallet(&state, &headers, &intent.wallet_address)?;
+
+    // Restore execution logs from DB on cache miss.
+    if state.services.agent.execution_logs_for_intent(intent_id).is_empty() {
+        if let Ok(db_logs) = load_logs_for_intent(
+            state.services.infra.postgres.as_ref(), intent_id
+        ).await {
+            state.services.agent.seed_execution_logs(intent_id, db_logs);
+        }
+    }
+
     Ok(Json(json!({
         "intent_id": intent.id,
         "reasoning_logs": [{
