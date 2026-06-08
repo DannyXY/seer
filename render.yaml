@@ -4,7 +4,7 @@ services:
     runtime: static
     buildCommand: cd frontend && npm install && npm run build
     staticPublishPath: frontend/dist
-    plan: starter
+    plan: free
     routes:
       - type: rewrite
         source: /*
@@ -21,7 +21,7 @@ services:
     runtime: docker
     dockerfilePath: backend/Dockerfile
     dockerContext: backend
-    plan: starter
+    plan: free
     envVars:
       - key: APP_ENV
         value: production
@@ -116,7 +116,7 @@ services:
     runtime: docker
     dockerfilePath: backend/Dockerfile
     dockerContext: backend
-    plan: starter
+    plan: free
     envVars:
       - key: APP_ENV
         value: production
@@ -204,9 +204,9 @@ services:
 
   - type: redis
     name: seer-redis
-    plan: starter
+    plan: free
     ipAllowList: []
 
 databases:
   - name: seer-postgres
-    plan: starter
+    plan: free
