@@ -37,11 +37,7 @@ services:
         fromDatabase:
           name: seer-postgres
           property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: seer-redis
-          property: connectionString
+
       - key: RUN_MIGRATIONS
         value: false
       - key: DEFILLAMA_ENABLED
@@ -128,11 +124,7 @@ services:
         fromDatabase:
           name: seer-postgres
           property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: seer-redis
-          property: connectionString
+
       - key: RUN_MIGRATIONS
         value: false
       - key: DEFILLAMA_ENABLED
@@ -204,10 +196,6 @@ services:
       - key: SEER_INTENT_REGISTRY_ADDRESS
         sync: false
 
-  - type: redis
-    name: seer-redis
-    plan: free
-    ipAllowList: []
 
 databases:
   - name: seer-postgres
