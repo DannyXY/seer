@@ -24,7 +24,7 @@ services:
     runtime: docker
     dockerfilePath: backend/Dockerfile
     dockerContext: backend
-    plan: free
+    plan: starter
     envVars:
       - key: APP_ENV
         value: production
