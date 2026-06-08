@@ -3,6 +3,7 @@
 !.env.example
 target/
 node_modules/
+dist/
 out/
 cache/
 coverage/
