@@ -5,9 +5,10 @@
    ============================================================ */
 
 {
-  const API_BASE = localStorage.getItem("seerApiBase") || window.SEER_API_BASE || (
-    window.location.protocol === "http:" && window.location.port === "10000" ? "" : "http://localhost:10000"
-  );
+  const API_BASE = localStorage.getItem("seerApiBase") || window.SEER_API_BASE ||
+    (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_API_URL
+      ? import.meta.env.VITE_API_URL
+      : (window.location.protocol === "http:" && window.location.port === "10000" ? "" : "http://localhost:10000"));
   const SESSION_KEY = "seerSession";
   const CAT = ["ALPHA", "ANOMALY", "RISK", "OPPORTUNITY"];
   const PROTOCOL_GLYPHS = {
