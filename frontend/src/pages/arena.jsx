@@ -1,5 +1,5 @@
 /* ============================================================
-   SEER — The Arena: predictions vs. AI + leaderboard
+   SEER - The Arena: predictions vs. AI + leaderboard
    ============================================================ */
 import { useState, useRef, useEffect } from 'react';
 import { sendOnChainTx } from '../utils/onchain.js';
@@ -32,7 +32,7 @@ function PredictionCard({ p, onBet, tick }) {
       </div>
 
       <h3 className="seer-pred-claim">{p.claim}</h3>
-      <p className="seer-pred-reason"><span style={{ color: "var(--coral-ink)", fontWeight: 500 }}>Seer's read — </span>{p.reason}</p>
+      <p className="seer-pred-reason"><span style={{ color: "var(--coral-ink)", fontWeight: 500 }}>Seer's read - </span>{p.reason}</p>
 
       <Odds conf={p.conf} />
 
@@ -152,7 +152,7 @@ export function ArenaScreen({ showToast }) {
     setClaiming(true);
     try {
       const hash = await sendOnChainTx(onchain.claim_starter_calldata);
-      showToast(`Claimed 1,000 pts — tx: ${hash.slice(0, 10)}…`, 'success');
+      showToast(`Claimed 1,000 pts - tx: ${hash.slice(0, 10)}…`, 'success');
       setOnchain(prev => ({ ...prev, has_claimed_starter_points: true, available_points: 1000 }));
       window.SEER.update({ userPoints: 1000 });
     } catch (err) {
@@ -171,14 +171,14 @@ export function ArenaScreen({ showToast }) {
         setTxPending(true);
         try {
           const hash = await sendOnChainTx(result.entry_calldata);
-          showToast(`Bet confirmed on-chain — tx: ${hash.slice(0, 10)}…`, 'success');
+          showToast(`Bet confirmed on-chain - tx: ${hash.slice(0, 10)}…`, 'success');
         } catch (txErr) {
           showToast(`Bet recorded. On-chain tx failed: ${txErr.message}`, 'error');
         } finally {
           setTxPending(false);
         }
       } else {
-        showToast(side === "AGREE" ? "Bet placed — you're with Seer." : "Bet placed — you're against Seer. Bold.", 'success');
+        showToast(side === "AGREE" ? "Bet placed - you're with Seer." : "Bet placed - you're against Seer. Bold.", 'success');
       }
     } catch (err) {
       showToast(err.message || "Bet failed.", 'error');
@@ -190,7 +190,7 @@ export function ArenaScreen({ showToast }) {
       <header className="seer-screen-head">
         <div className="col" style={{ gap: 9 }}>
           <h1 className="serif seer-h1">The Arena</h1>
-          <p className="seer-screen-sub" style={{ margin: 0 }}>Seer makes on-chain predictions. Bet with it, or against it. Win if you're smarter — lose, and learn exactly why.</p>
+          <p className="seer-screen-sub" style={{ margin: 0 }}>Seer makes on-chain predictions. Bet with it, or against it. Win if you're smarter - lose, and learn exactly why.</p>
         </div>
         <div className="seer-balance">
           <span className="eyebrow" style={{ whiteSpace: "nowrap" }}>Your balance</span>
@@ -216,7 +216,7 @@ export function ArenaScreen({ showToast }) {
       {txPending && (
         <div className="seer-claim-banner" style={{ borderColor: "var(--c-opp-line)", background: "var(--c-opp-wash)" }}>
           <div className="seer-spinner" style={{ width: 18, height: 18, borderTopColor: "var(--c-opp)", flexShrink: 0 }} />
-          <span style={{ fontSize: 13.5 }}>Sending bet to Mantle Sepolia — confirm in your wallet…</span>
+          <span style={{ fontSize: 13.5 }}>Sending bet to Mantle Sepolia - confirm in your wallet…</span>
         </div>
       )}
 

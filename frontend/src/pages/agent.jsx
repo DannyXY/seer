@@ -1,5 +1,5 @@
 /* ============================================================
-   SEER — My Agent: the conversation is the product
+   SEER - My Agent: the conversation is the product
    Chat-led intent creation à la Magic Newton. Seer has a voice,
    a face (the orb), and surfaces structured "Confirm Agent" cards.
    ============================================================ */
@@ -68,7 +68,7 @@ function ConfirmAgentCard({ card, onContinue, onEdit, onCancel, done }) {
       </div>
       <div className="seer-simulation-banner">
         <span className="seer-simulation-badge">Simulation</span>
-        <span>Seer will plan and track this intent — but live execution isn't active yet. Intent hash is anchored on-chain via SeerIntentRegistry.</span>
+        <span>Seer will plan and track this intent - but live execution isn't active yet. Intent hash is anchored on-chain via SeerIntentRegistry.</span>
       </div>
       {done ? (
         <div className="seer-confirm-done"><Icon name="check" size={15} style={{ color: "var(--c-opp)" }} />Deployed and running</div>

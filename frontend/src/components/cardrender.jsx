@@ -1,5 +1,5 @@
 /* ============================================================
-   SEER — Identity card renderer (canvas → shareable image)
+   SEER - Identity card renderer (canvas → shareable image)
    Drawn on canvas so the on-screen card and the export are
    byte-identical. Geometry-only sigils, seeded per archetype.
    ============================================================ */

@@ -86,6 +86,7 @@ pub fn router(state: AppState) -> Router {
             get(agent::reasoning),
         )
         .route("/api/agent/intent/:intent_id/pause", post(agent::pause))
+        .route("/api/agent/intent/:intent_id/resume", post(agent::resume))
         .route(
             "/api/agent/intent/:intent_id/activate",
             post(agent::activate),

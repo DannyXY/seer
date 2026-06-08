@@ -33,11 +33,25 @@ contract SeerIntentRegistry {
     mapping(uint256 => Intent) public intents;
     mapping(uint256 => ExecutionPolicy) public executionPolicies;
 
-    event IntentRegistered(uint256 indexed intentId, address indexed user, bytes32 intentHash);
+    /// Track all intent IDs belonging to a wallet for easy on-chain recovery.
+    mapping(address => uint256[]) public userIntentIds;
+
+    // ── Events ────────────────────────────────────────────────────────────────
+
+    /// metadataURI is included so backends can reconstruct intent data from
+    /// logs alone without a separate eth_call.
+    event IntentRegistered(
+        uint256 indexed intentId,
+        address indexed user,
+        bytes32 intentHash,
+        string metadataURI
+    );
     event IntentStatusUpdated(uint256 indexed intentId, IntentStatus status);
     event ReasoningLogAdded(uint256 indexed intentId, bytes32 reasoningHash, string metadataURI);
     event ExecutionPolicyRegistered(uint256 indexed policyId, uint256 indexed intentId, bytes32 policyHash, uint256 expiresAt);
     event ExecutionPolicyRevoked(uint256 indexed policyId);
+
+    // ── Modifiers ─────────────────────────────────────────────────────────────
 
     modifier onlyOwner() {
         require(msg.sender == owner, "NOT_OWNER");
@@ -55,10 +69,13 @@ contract SeerIntentRegistry {
         backendSigner = signer;
     }
 
+    // ── Intent lifecycle ──────────────────────────────────────────────────────
+
     function registerIntent(bytes32 intentHash, string calldata metadataURI) external returns (uint256) {
         uint256 intentId = nextIntentId++;
         intents[intentId] = Intent(msg.sender, intentHash, metadataURI, IntentStatus.Draft);
-        emit IntentRegistered(intentId, msg.sender, intentHash);
+        userIntentIds[msg.sender].push(intentId);
+        emit IntentRegistered(intentId, msg.sender, intentHash, metadataURI);
         return intentId;
     }
 
@@ -70,6 +87,50 @@ contract SeerIntentRegistry {
         intent.status = IntentStatus(status);
         emit IntentStatusUpdated(intentId, IntentStatus(status));
     }
+
+    /// Convenience: pause an active intent.
+    function pauseIntent(uint256 intentId) external {
+        Intent storage intent = intents[intentId];
+        require(intent.user != address(0), "UNKNOWN_INTENT");
+        require(msg.sender == intent.user || msg.sender == backendSigner, "NOT_AUTHORIZED");
+        require(intent.status == IntentStatus.Active, "NOT_ACTIVE");
+        intent.status = IntentStatus.Paused;
+        emit IntentStatusUpdated(intentId, IntentStatus.Paused);
+    }
+
+    /// Convenience: resume a paused intent.
+    function resumeIntent(uint256 intentId) external {
+        Intent storage intent = intents[intentId];
+        require(intent.user != address(0), "UNKNOWN_INTENT");
+        require(msg.sender == intent.user || msg.sender == backendSigner, "NOT_AUTHORIZED");
+        require(intent.status == IntentStatus.Paused, "NOT_PAUSED");
+        intent.status = IntentStatus.Active;
+        emit IntentStatusUpdated(intentId, IntentStatus.Active);
+    }
+
+    /// Convenience: cancel an intent (irreversible).
+    function cancelIntent(uint256 intentId) external {
+        Intent storage intent = intents[intentId];
+        require(intent.user != address(0), "UNKNOWN_INTENT");
+        require(msg.sender == intent.user || msg.sender == backendSigner, "NOT_AUTHORIZED");
+        require(
+            intent.status != IntentStatus.Cancelled && intent.status != IntentStatus.Completed,
+            "ALREADY_TERMINAL"
+        );
+        intent.status = IntentStatus.Cancelled;
+        emit IntentStatusUpdated(intentId, IntentStatus.Cancelled);
+    }
+
+    // ── View helpers ──────────────────────────────────────────────────────────
+
+    /// Return all intent IDs registered by a wallet.
+    /// Backends can call this then read intents[id] for each, or replay
+    /// IntentRegistered logs — both paths give full intent data.
+    function getUserIntentIds(address user) external view returns (uint256[] memory) {
+        return userIntentIds[user];
+    }
+
+    // ── Reasoning & policies ──────────────────────────────────────────────────
 
     function addReasoningLog(uint256 intentId, bytes32 reasoningHash, string calldata metadataURI) external onlyBackendSigner {
         require(intents[intentId].user != address(0), "UNKNOWN_INTENT");

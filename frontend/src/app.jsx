@@ -1,5 +1,5 @@
 /* ============================================================
-   SEER — app root + routing with Privy auth
+   SEER - app root + routing with Privy auth
    ============================================================ */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
@@ -81,7 +81,7 @@ function App() {
   const [toast, setToast] = useState(null); // { msg, kind: 'info'|'success'|'error' }
   const [navCollapsed, setNavCollapsed] = useState(() => { try { return localStorage.getItem("seerNav") !== "0"; } catch (e) { return true; } });
   const [smartAccount, setSmartAccount] = useState(null);
-  const connectingRef = useRef(false); // lock — prevents concurrent sign prompts
+  const connectingRef = useRef(false); // lock - prevents concurrent sign prompts
 
   const toggleNav = useCallback(() => setNavCollapsed((c) => { const n = !c; try { localStorage.setItem("seerNav", n ? "1" : "0"); } catch (e) {} return n; }), []);
   const setRoute = useCallback((next) => {
@@ -89,7 +89,7 @@ function App() {
     pushRoute(next);
   }, []);
 
-  // Handle Privy authentication — runs once when the user first authenticates.
+  // Handle Privy authentication - runs once when the user first authenticates.
   // route/setRoute are intentionally excluded from deps to avoid re-running
   // after navigation, which would trigger duplicate sign prompts.
   useEffect(() => {
@@ -102,6 +102,14 @@ function App() {
         if (wallet.getEthersProvider) {
           window.privyEthersProvider = await wallet.getEthersProvider();
           window.privyWallet = wallet;
+        }
+        // Switch embedded wallets (Google/email) to Mantle Sepolia immediately
+        // so all subsequent calls are already on the right chain.
+        if (wallet.switchChain) {
+          try { await wallet.switchChain(5003); } catch (_) {}
+          if (wallet.getEthersProvider) {
+            window.privyEthersProvider = await wallet.getEthersProvider();
+          }
         }
         const smartAcc = await createSmartAccount(wallet);
         setSmartAccount(smartAcc);
@@ -156,7 +164,7 @@ function App() {
         .then(() => window.SeerLive?.start?.())
         .catch((err) => {
           if (err.status === 401) {
-            // Session expired — force re-auth; clearSession already called in request()
+            // Session expired - force re-auth; clearSession already called in request()
             setConnected(false);
           } else {
             showToast(err.message, 'error');
@@ -174,7 +182,7 @@ function App() {
   const onMirror = useCallback((s) => {
     setRoute("agent");
     window.SEER?.update({ pendingIntentText: `Mirror this signal: ${s.head}. ${s.body}` });
-    showToast("Intent pre-filled from signal — review and deploy.", 'success');
+    showToast("Intent pre-filled from signal - review and deploy.", 'success');
   }, [setRoute, showToast]);
 
   const connect = useCallback(async () => {

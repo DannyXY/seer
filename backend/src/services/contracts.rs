@@ -6,6 +6,8 @@ use ethers_core::{
 use ethers::signers::{LocalWallet, Signer};
 use serde_json::{json, Value};
 use std::str::FromStr;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use crate::config::Settings;
 use crate::models::execution::{
@@ -28,6 +30,9 @@ pub struct ContractService {
     pub aa_entry_point_address: Option<String>,
     pub aa_paymaster_url: Option<String>,
     client: reqwest::Client,
+    /// Serialises all backend-signed transactions so each one gets a fresh,
+    /// sequential nonce — prevents "nonce too low" errors under concurrent load.
+    nonce_lock: Arc<Mutex<()>>,
 }
 
 impl ContractService {
@@ -45,6 +50,7 @@ impl ContractService {
             aa_entry_point_address: settings.aa_entry_point_address,
             aa_paymaster_url: settings.aa_paymaster_url,
             client: reqwest::Client::new(),
+            nonce_lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -315,41 +321,181 @@ impl ContractService {
     }
 
     /// Fetch all IntentRegistered events for a wallet from SeerIntentRegistry.
-    /// Returns (onchain_intent_id, intent_hash_hex) pairs, newest first.
-    pub async fn get_registered_intents_onchain(&self, wallet: &str) -> anyhow::Result<Vec<(u64, String)>> {
-        let rpc_url = self.rpc_url.as_ref().ok_or_else(|| anyhow::anyhow!("MANTLE_RPC_URL not configured"))?;
-        let to = self.intent_registry_address.as_ref().ok_or_else(|| anyhow::anyhow!("INTENT_REGISTRY_ADDRESS not configured"))?;
+    /// Returns (onchain_intent_id, intent_hash_hex, metadata_uri) tuples, oldest first.
+    /// The updated contract emits metadataURI in the event so we can reconstruct
+    /// intents from chain alone without a separate eth_call.
+    pub async fn get_registered_intents_onchain(
+        &self,
+        wallet: &str,
+    ) -> anyhow::Result<Vec<(u64, String, String)>> {
+        let rpc_url = self
+            .rpc_url
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("MANTLE_RPC_URL not configured"))?;
+        let to = self
+            .intent_registry_address
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("INTENT_REGISTRY_ADDRESS not configured"))?;
 
-        // IntentRegistered(uint256 indexed intentId, address indexed user, bytes32 intentHash)
-        let topic0 = format!("0x{}", hex_encode(&ethers_core::utils::keccak256(
-            b"IntentRegistered(uint256,address,bytes32)"
-        )));
-        // Pad wallet address to 32 bytes (topic encoding for indexed address)
+        // IntentRegistered(uint256 indexed intentId, address indexed user, bytes32 intentHash, string metadataURI)
+        let topic0 = format!(
+            "0x{}",
+            hex_encode(&ethers_core::utils::keccak256(
+                b"IntentRegistered(uint256,address,bytes32,string)"
+            ))
+        );
         let wallet_clean = wallet.trim_start_matches("0x").to_lowercase();
         let topic2 = format!("0x{:0>64}", wallet_clean);
 
-        let response = self.rpc_call(rpc_url, "eth_getLogs", serde_json::json!([{
-            "address": to,
-            "topics": [topic0, null, topic2],
-            "fromBlock": "0x0",
-            "toBlock": "latest",
-        }])).await?;
+        let response = self
+            .rpc_call(
+                rpc_url,
+                "eth_getLogs",
+                serde_json::json!([{
+                    "address": to,
+                    "topics": [topic0, null, topic2],
+                    "fromBlock": "0x0",
+                    "toBlock": "latest",
+                }]),
+            )
+            .await?;
 
         let empty = vec![];
-        let logs = response.get("result").and_then(Value::as_array).unwrap_or(&empty);
+        let logs = response
+            .get("result")
+            .and_then(Value::as_array)
+            .unwrap_or(&empty);
 
-        let mut results: Vec<(u64, String)> = logs.iter().rev().filter_map(|log| {
-            let topics = log.get("topics").and_then(Value::as_array)?;
-            let id_hex = topics.get(1).and_then(Value::as_str)?;
-            let hash_bytes_raw = log.get("data").and_then(Value::as_str).unwrap_or("0x");
-            let id_bytes = ethers_core::utils::hex::decode(id_hex.trim_start_matches("0x")).ok()?;
-            let intent_id = U256::from_big_endian(&id_bytes).min(U256::from(u64::MAX)).as_u64();
-            // intentHash is the non-indexed bytes32 — it's in the log data field
-            let hash_hex = hash_bytes_raw.trim_start_matches("0x");
-            Some((intent_id, hash_hex.to_string()))
-        }).collect();
+        let results: Vec<(u64, String, String)> = logs
+            .iter()
+            .filter_map(|log| {
+                let topics = log.get("topics").and_then(Value::as_array)?;
+                let id_hex = topics.get(1).and_then(Value::as_str)?;
+                let id_bytes =
+                    ethers_core::utils::hex::decode(id_hex.trim_start_matches("0x")).ok()?;
+                let intent_id = U256::from_big_endian(&id_bytes)
+                    .min(U256::from(u64::MAX))
+                    .as_u64();
+
+                // data = ABI-encoded (bytes32 intentHash, string metadataURI)
+                // layout: [0..32] hash | [32..64] string_offset | [64..96] string_len | [96..] string_bytes
+                let data_hex = log.get("data").and_then(Value::as_str).unwrap_or("0x");
+                let data =
+                    ethers_core::utils::hex::decode(data_hex.trim_start_matches("0x")).ok()?;
+
+                // intentHash: first 32 bytes
+                let hash_hex = if data.len() >= 32 {
+                    hex_encode(&data[0..32])
+                } else {
+                    return None;
+                };
+
+                // metadataURI: decode dynamic string starting at byte 32
+                let metadata_uri = decode_abi_string(&data, 32).unwrap_or_default();
+
+                Some((intent_id, hash_hex, metadata_uri))
+            })
+            .collect();
 
         Ok(results)
+    }
+
+    /// Fetch all PredictionEntered events for a wallet from SeerPredictionRegistry.
+    /// Returns (prediction_id, position, points_amount) tuples.
+    pub async fn get_entries_for_user_onchain(
+        &self,
+        wallet: &str,
+    ) -> anyhow::Result<Vec<(u64, u8, u64)>> {
+        let rpc_url = self
+            .rpc_url
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("MANTLE_RPC_URL not configured"))?;
+        let to = self
+            .prediction_registry_address
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("PREDICTION_REGISTRY_ADDRESS not configured"))?;
+
+        // PredictionEntered(uint256 indexed predictionId, address indexed user, uint8 position, uint256 pointsAmount)
+        let topic0 = format!(
+            "0x{}",
+            hex_encode(&ethers_core::utils::keccak256(
+                b"PredictionEntered(uint256,address,uint8,uint256)"
+            ))
+        );
+        let wallet_clean = wallet.trim_start_matches("0x").to_lowercase();
+        let topic2 = format!("0x{:0>64}", wallet_clean);
+
+        let response = self
+            .rpc_call(
+                rpc_url,
+                "eth_getLogs",
+                serde_json::json!([{
+                    "address": to,
+                    "topics": [topic0, null, topic2],
+                    "fromBlock": "0x0",
+                    "toBlock": "latest",
+                }]),
+            )
+            .await?;
+
+        let empty = vec![];
+        let logs = response
+            .get("result")
+            .and_then(Value::as_array)
+            .unwrap_or(&empty);
+
+        let results: Vec<(u64, u8, u64)> = logs
+            .iter()
+            .filter_map(|log| {
+                let topics = log.get("topics").and_then(Value::as_array)?;
+                let pred_id_hex = topics.get(1).and_then(Value::as_str)?;
+                let pred_id_bytes =
+                    ethers_core::utils::hex::decode(pred_id_hex.trim_start_matches("0x")).ok()?;
+                let prediction_id = U256::from_big_endian(&pred_id_bytes)
+                    .min(U256::from(u64::MAX))
+                    .as_u64();
+
+                // data = ABI-encoded (uint8 position, uint256 pointsAmount)
+                // layout: [0..32] position (padded) | [32..64] pointsAmount
+                let data_hex = log.get("data").and_then(Value::as_str).unwrap_or("0x");
+                let data =
+                    ethers_core::utils::hex::decode(data_hex.trim_start_matches("0x")).ok()?;
+                if data.len() < 64 {
+                    return None;
+                }
+                let position = data[31]; // last byte of first 32-byte slot
+                let points =
+                    U256::from_big_endian(&data[32..64]).min(U256::from(u64::MAX)).as_u64();
+
+                Some((prediction_id, position, points))
+            })
+            .collect();
+
+        Ok(results)
+    }
+
+    /// Build calldata to call `pauseIntent(uint256)` on SeerIntentRegistry.
+    pub fn pause_intent_calldata(&self, onchain_intent_id: u64) -> Option<(String, String)> {
+        let to = self.intent_registry_address.as_ref()?;
+        let mut data = id("pauseIntent(uint256)")[..4].to_vec();
+        data.extend(encode(&[Token::Uint(U256::from(onchain_intent_id))]));
+        Some((to.clone(), format!("0x{}", hex_encode(&data))))
+    }
+
+    /// Build calldata to call `resumeIntent(uint256)` on SeerIntentRegistry.
+    pub fn resume_intent_calldata(&self, onchain_intent_id: u64) -> Option<(String, String)> {
+        let to = self.intent_registry_address.as_ref()?;
+        let mut data = id("resumeIntent(uint256)")[..4].to_vec();
+        data.extend(encode(&[Token::Uint(U256::from(onchain_intent_id))]));
+        Some((to.clone(), format!("0x{}", hex_encode(&data))))
+    }
+
+    /// Build calldata to call `cancelIntent(uint256)` on SeerIntentRegistry.
+    pub fn cancel_intent_calldata(&self, onchain_intent_id: u64) -> Option<(String, String)> {
+        let to = self.intent_registry_address.as_ref()?;
+        let mut data = id("cancelIntent(uint256)")[..4].to_vec();
+        data.extend(encode(&[Token::Uint(U256::from(onchain_intent_id))]));
+        Some((to.clone(), format!("0x{}", hex_encode(&data))))
     }
 
     // ── Identity SBT helpers ─────────────────────────────────────────────────
@@ -498,6 +644,10 @@ impl ContractService {
         let wallet: LocalWallet = private_key.parse::<LocalWallet>()?.with_chain_id(self.chain_id);
         let from = wallet.address();
 
+        // Hold the lock for the entire sign+send cycle so concurrent calls
+        // don't fetch the same pending nonce and collide.
+        let _guard = self.nonce_lock.lock().await;
+
         let nonce = self.get_nonce(rpc_url, &format!("{from:?}")).await?;
         let gas_price = self.get_gas_price(rpc_url).await?;
 
@@ -606,6 +756,24 @@ fn u256_from_return_data(hex: &str) -> U256 {
     let bytes = ethers_core::utils::hex::decode(hex.trim_start_matches("0x")).unwrap_or_default();
     if bytes.len() < 32 { return U256::zero(); }
     U256::from_big_endian(&bytes[bytes.len() - 32..])
+}
+
+/// Decode a Solidity ABI-encoded `string` from a byte slice.
+/// `offset_slot` is the byte index of the 32-byte word that holds the
+/// offset to the string's length prefix (typically 32 for the second slot).
+fn decode_abi_string(data: &[u8], offset_slot: usize) -> Option<String> {
+    if data.len() < offset_slot + 32 { return None; }
+    // Read the offset value (points to where the length word lives)
+    let offset = U256::from_big_endian(&data[offset_slot..offset_slot + 32])
+        .min(U256::from(usize::MAX))
+        .as_usize();
+    if data.len() < offset + 32 { return None; }
+    let len = U256::from_big_endian(&data[offset..offset + 32])
+        .min(U256::from(usize::MAX))
+        .as_usize();
+    let start = offset + 32;
+    if data.len() < start + len { return None; }
+    String::from_utf8(data[start..start + len].to_vec()).ok()
 }
 
 fn validate_hex_address(value: &str, name: &str) -> anyhow::Result<()> {

@@ -1,5 +1,5 @@
 /* ============================================================
-   SEER — shared primitives
+   SEER - shared primitives
    ============================================================ */
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 

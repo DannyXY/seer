@@ -52,10 +52,17 @@ contract SeerPredictionRegistry {
     mapping(uint256 => Prediction) public predictions;
     mapping(uint256 => mapping(address => Entry)) public entries;
 
+    /// Track which predictions each user has entered for easy on-chain recovery.
+    mapping(address => uint256[]) public userEnteredPredictions;
+
+    // ── Events ────────────────────────────────────────────────────────────────
+
     event PredictionCreated(uint256 indexed predictionId, bytes32 dataKey, uint256 expiryTime);
     event PredictionEntered(uint256 indexed predictionId, address indexed user, Position position, uint256 pointsAmount);
     event PredictionResolved(uint256 indexed predictionId, Outcome outcome, uint256 finalValue);
     event EntrySettled(uint256 indexed predictionId, address indexed user, int256 pointsDelta);
+
+    // ── Modifiers ─────────────────────────────────────────────────────────────
 
     modifier onlyOwner() {
         require(msg.sender == owner, "NOT_OWNER");
@@ -79,6 +86,8 @@ contract SeerPredictionRegistry {
         require(nextResolver != address(0), "ZERO_RESOLVER");
         resolver = nextResolver;
     }
+
+    // ── Predictions ───────────────────────────────────────────────────────────
 
     function createPrediction(
         string calldata claim,
@@ -121,6 +130,7 @@ contract SeerPredictionRegistry {
 
         points.lockPoints(msg.sender, pointsAmount);
         entries[predictionId][msg.sender] = Entry(Position(position), pointsAmount, false);
+        userEnteredPredictions[msg.sender].push(predictionId);
 
         emit PredictionEntered(predictionId, msg.sender, Position(position), pointsAmount);
     }
@@ -153,6 +163,15 @@ contract SeerPredictionRegistry {
 
         emit EntrySettled(predictionId, user, pointsDelta);
     }
+
+    // ── View helpers ──────────────────────────────────────────────────────────
+
+    /// Return all prediction IDs that a wallet has entered.
+    function getUserEnteredPredictions(address user) external view returns (uint256[] memory) {
+        return userEnteredPredictions[user];
+    }
+
+    // ── Internal ──────────────────────────────────────────────────────────────
 
     function _entryPointsDelta(Prediction storage prediction, Entry storage entry) internal view returns (int256) {
         if (prediction.outcome == Outcome.Void) {

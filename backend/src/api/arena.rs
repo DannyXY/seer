@@ -132,7 +132,7 @@ pub async fn entries(
 ) -> Result<Json<Value>, ApiError> {
     require_wallet(&state, &headers, &address)?;
 
-    // Restore entries from DB on cache miss.
+    // 1. Restore entries from DB on cache miss.
     if state.services.arena.entries_for_wallet(&address).is_empty() {
         if let Ok(db_entries) = load_entries_for_wallet(
             state.services.infra.postgres.as_ref(), &address
@@ -141,7 +141,65 @@ pub async fn entries(
         }
     }
 
-    // Sync on-chain points so balance is accurate even after restart.
+    // 2. Seed any entries found on-chain that are still missing locally.
+    //    Queries PredictionEntered events filtered by this wallet address.
+    if state.services.contracts.rpc_configured() {
+        if let Ok(onchain_entries) = state
+            .services
+            .contracts
+            .get_entries_for_user_onchain(&address)
+            .await
+        {
+            for (onchain_pred_id, position_u8, points) in onchain_entries {
+                // Find the local prediction by its on-chain ID.
+                let prediction = state
+                    .services
+                    .arena
+                    .get_prediction_by_onchain_id(onchain_pred_id);
+
+                let prediction_uuid = match prediction {
+                    Some(p) => p.id,
+                    // Prediction not yet seeded locally — skip this entry for now;
+                    // it will appear once the predictions endpoint is called.
+                    None => continue,
+                };
+
+                // Skip if we already have an entry for this prediction.
+                let already_has = state
+                    .services
+                    .arena
+                    .entries_for_wallet(&address)
+                    .iter()
+                    .any(|e| e.prediction_id == prediction_uuid);
+                if already_has {
+                    continue;
+                }
+
+                let user_position = if position_u8 == 0 {
+                    crate::models::arena::ArenaPosition::BackSeer
+                } else {
+                    crate::models::arena::ArenaPosition::ChallengeSeer
+                };
+
+                let entry = crate::models::arena::ArenaEntry {
+                    id: uuid::Uuid::new_v4(),
+                    prediction_id: prediction_uuid,
+                    wallet_address: address.clone(),
+                    user_position,
+                    points_committed: points as u32,
+                    status: crate::models::arena::ArenaEntryStatus::Active,
+                    points_delta: None,
+                    tx_hash: None,
+                    created_at: chrono::Utc::now(),
+                    resolved_at: None,
+                };
+
+                state.services.arena.seed_entries(vec![entry]);
+            }
+        }
+    }
+
+    // 3. Sync on-chain points so balance is accurate even after restart.
     if let Ok(onchain_pts) = state.services.contracts.read_available_points(&address).await {
         state.services.arena.sync_points(&address, onchain_pts);
     }

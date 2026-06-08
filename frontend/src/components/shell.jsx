@@ -1,5 +1,5 @@
 /* ============================================================
-   SEER — app shell: sidebar + right context rail
+   SEER - app shell: sidebar + right context rail
    ============================================================ */
 import { useState, useEffect } from 'react';
 
@@ -94,7 +94,7 @@ function RightRail({ setRoute, riskScore }) {
             <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>{intent.lastAction}</div>
           </div>
         ) : (
-          <div className="mut" style={{ fontSize: 13, marginTop: 12 }}>No active agent — set an intent.</div>
+          <div className="mut" style={{ fontSize: 13, marginTop: 12 }}>No active agent - set an intent.</div>
         )}
       </div>
 

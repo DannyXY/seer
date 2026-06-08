@@ -1,5 +1,5 @@
 /* ============================================================
-   SEER — Landing (Instrument revamp)
+   SEER - Landing (Instrument revamp)
    The prism mechanic is the hero: raw on-chain noise enters,
    the signal spectrum emerges. Terminal density, mono voice,
    voltage used once.
@@ -71,7 +71,7 @@ function PrismField() {
         g.addColorStop(1, hexA(SPECTRUM[i].hex, 0.06));
         ctx.strokeStyle = g; ctx.lineWidth = 1.4;
         ctx.beginPath(); ctx.moveTo(px + half * 0.4, py); ctx.lineTo(ex, ey); ctx.stroke();
-        // label — right-aligned at a fixed inset so long names never clip
+        // label - right-aligned at a fixed inset so long names never clip
         const lx = w - 14, ly = py + Math.tan(ang) * (lx - px);
         ctx.fillStyle = hexA(SPECTRUM[i].hex, 0.92);
         ctx.font = "600 10px 'JetBrains Mono', monospace";
@@ -213,9 +213,9 @@ function ConnectModal({ onClose, onConnect }) {
 
 /* ---------- surfaces ---------- */
 const SURFACES = [
-  { n: "01", c: "#4E9BFF", nm: "Signal Feed",      ds: "On-chain intelligence, explained the moment it happens — with the wallets, timing, and confidence behind every call." },
-  { n: "02", c: "#2BD4BE", nm: "The Agent",        ds: "Set an intent in plain English. Seer finds the route, executes on-chain, and rebalances — non-custodial, while you sleep." },
-  { n: "03", c: "#E15CD2", nm: "The Arena",        ds: "Seer makes public predictions and stakes its reputation. Bet with it, or against it — win if you're sharper." },
+  { n: "01", c: "#4E9BFF", nm: "Signal Feed",      ds: "On-chain intelligence, explained the moment it happens - with the wallets, timing, and confidence behind every call." },
+  { n: "02", c: "#2BD4BE", nm: "The Agent",        ds: "Set an intent in plain English. Seer finds the route, executes on-chain, and rebalances - non-custodial, while you sleep." },
+  { n: "03", c: "#E15CD2", nm: "The Arena",        ds: "Seer makes public predictions and stakes its reputation. Bet with it, or against it - win if you're sharper." },
   { n: "04", c: "#F7A833", nm: "On-chain Identity", ds: "Every call you make and move you mirror builds a portable, provable record of what you've gotten right." },
 ];
 
@@ -252,7 +252,7 @@ export default function Landing({ onEnter, isAuthenticated }) {
           <div>
             <div className="eyebrow">On-chain intelligence · Built on Mantle</div>
             <h1 className="sl-hero-h1">See<br /><em>before</em><br />they do.</h1>
-            <p className="sl-hero-sub">Seer reads Mantle the moment patterns form — then turns the noise into <b>signal you can act on in one click.</b> An instrument, not another dashboard.</p>
+            <p className="sl-hero-sub">Seer reads Mantle the moment patterns form - then turns the noise into <b>signal you can act on in one click.</b> An instrument, not another dashboard.</p>
             <div className="sl-hero-cta">
               <button className="btn btn-primary" style={{ padding: "14px 22px", fontSize: 15 }} onClick={handleEnter}>{isAuthenticated ? "Enter app" : "Connect Wallet"}<Icon name="arrow" size={17} /></button>
               {!isAuthenticated && <button className="btn btn-ghost" style={{ padding: "14px 18px", fontSize: 15 }} onClick={handleEnter}>Enter app</button>}
@@ -293,7 +293,7 @@ export default function Landing({ onEnter, isAuthenticated }) {
         <section className="sl-sec sl-rise">
           <div className="sl-sec-head">
             <span className="idx">01</span><h2>Noise in.<br />Signal out.</h2>
-            <p>Thousands of wallets, pools and events cross Mantle every minute. Seer resolves them — like light through a prism — into four kinds of signal.</p>
+            <p>Thousands of wallets, pools and events cross Mantle every minute. Seer resolves them - like light through a prism - into four kinds of signal.</p>
           </div>
           <div className="sl-mech">
             <div className="sl-mech-col">
@@ -323,7 +323,7 @@ export default function Landing({ onEnter, isAuthenticated }) {
           <div>
             <span className="idx mono" style={{ color: "var(--volt)", fontSize: 12, letterSpacing: "0.1em" }}>02</span>
             <h2>Every signal,<br />with its <em>evidence.</em></h2>
-            <p>No black box. Each read names the wallets, the protocol, the timing and a confidence score — then offers one button to act.</p>
+            <p>No black box. Each read names the wallets, the protocol, the timing and a confidence score - then offers one button to act.</p>
             <div className="sl-proof-list">
               <div className="it"><Icon name="check" size={17} /><span>Confidence-scored, never a bare alert</span></div>
               <div className="it"><Icon name="check" size={17} /><span>Linked to the exact wallets and txns</span></div>

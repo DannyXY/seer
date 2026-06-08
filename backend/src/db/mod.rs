@@ -112,7 +112,6 @@ pub async fn persist_agent_intent(
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
         ON CONFLICT (intent_hash) DO UPDATE SET
-            id = EXCLUDED.id,
             wallet_address = EXCLUDED.wallet_address,
             raw_intent = EXCLUDED.raw_intent,
             parsed_intent = EXCLUDED.parsed_intent,

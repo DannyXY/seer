@@ -1,5 +1,5 @@
 /* ============================================================
-   SEER — My Identity: oracle card + analysis + share
+   SEER - My Identity: oracle card + analysis + share
    ============================================================ */
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { drawIdentityCard } from '../components/cardrender.jsx';
@@ -29,7 +29,7 @@ function ShareModal({ archKey, data, onClose }) {
   const [url, setUrl] = useState(null);
   const handleReady = useCallback((cv) => { setUrl(cv.toDataURL("image/png")); }, []);
   const arch = window.SEER.ARCHETYPES[archKey] || window.SEER.ARCHETYPES.strategist;
-  const post = `My Mantle DeFi identity, read by @SeerProtocol: "${arch.name}" — ${data.percentileLabel}. See before they do. #MantleAIHackathon`;
+  const post = `My Mantle DeFi identity, read by @SeerProtocol: "${arch.name}" - ${data.percentileLabel}. See before they do. #MantleAIHackathon`;
   return (
     <div className="seer-modal-bg" onClick={onClose}>
       <div className="card seer-share-modal" onClick={(e) => e.stopPropagation()}>
@@ -91,7 +91,7 @@ export function IdentityScreen({ showToast }) {
     setMinting(true);
     try {
       const result = await window.SeerAPI.mintIdentity();
-      showToast(result.token_id ? `Identity minted — Token #${result.token_id}` : "Identity minted.", 'success');
+      showToast(result.token_id ? `Identity minted - Token #${result.token_id}` : "Identity minted.", 'success');
     } catch (err) {
       showToast(err.message || "Mint failed.", 'error');
     } finally {
@@ -118,7 +118,7 @@ export function IdentityScreen({ showToast }) {
       <header className="seer-screen-head">
         <div className="col" style={{ gap: 9 }}>
           <h1 className="serif seer-h1">My Identity</h1>
-          <p className="seer-screen-sub" style={{ margin: 0 }}>Seer read your wallet and named what it found. This is your DeFi identity — benchmarked against smart money, yours to mint and share.</p>
+          <p className="seer-screen-sub" style={{ margin: 0 }}>Seer read your wallet and named what it found. This is your DeFi identity - benchmarked against smart money, yours to mint and share.</p>
         </div>
       </header>
 
@@ -191,7 +191,7 @@ export function IdentityScreen({ showToast }) {
               <span className="eyebrow" style={{ color: "var(--coral)" }}>Recommended next move</span>
               <span style={{ fontSize: 14, lineHeight: 1.5, maxWidth: 620 }}>{base.nextMove}</span>
             </div>
-            <button className="btn btn-primary" style={{ flexShrink: 0 }} onClick={() => showToast("Routed to My Agent — intent pre-filled.")}>Let my agent execute<Icon name="arrow" size={15} /></button>
+            <button className="btn btn-primary" style={{ flexShrink: 0 }} onClick={() => showToast("Routed to My Agent - intent pre-filled.")}>Let my agent execute<Icon name="arrow" size={15} /></button>
           </div>
         </div>
       </section>

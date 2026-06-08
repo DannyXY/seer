@@ -43,6 +43,15 @@ impl ArenaService {
             .cloned()
     }
 
+    pub fn get_prediction_by_onchain_id(&self, onchain_id: u64) -> Option<ArenaPrediction> {
+        self.predictions
+            .read()
+            .expect("arena prediction store poisoned")
+            .values()
+            .find(|p| p.onchain_prediction_id == Some(onchain_id))
+            .cloned()
+    }
+
     pub fn validate_entry(&self, entry: &ArenaEntryRequest) -> anyhow::Result<()> {
         if entry.points_committed == 0 || entry.points_committed > 1_000 {
             anyhow::bail!("points_committed must be between 1 and 1000");

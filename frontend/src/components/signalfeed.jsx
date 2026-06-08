@@ -1,5 +1,5 @@
 /* ============================================================
-   SEER — Signal Feed (hero screen)
+   SEER - Signal Feed (hero screen)
    ============================================================ */
 import { useState, useEffect, useRef } from 'react';
 
@@ -89,7 +89,7 @@ export function SignalFeed({ onMirror }) {
               <span className="mono" style={{ fontSize: 12.5, color: "var(--ink-2)" }}>Live · <CountUp to={seer.stats.signalsToday} dur={900} /> signals today</span>
             </span>
           </div>
-          <p className="seer-screen-sub" style={{ margin: 0 }}>On-chain intelligence, explained. Seer reads patterns the moment they form — not after.</p>
+          <p className="seer-screen-sub" style={{ margin: 0 }}>On-chain intelligence, explained. Seer reads patterns the moment they form - not after.</p>
         </div>
         <button className={"btn btn-ghost" + (paused ? " seer-paused" : "")} onClick={() => setPaused((p) => !p)}>
           <Icon name={paused ? "signal" : "pause"} size={15} />{paused ? "Resume" : "Pause"} feed
@@ -119,7 +119,7 @@ export function SignalFeed({ onMirror }) {
               <span className="mono" style={{ fontSize: 13, color: "var(--ink-3s)", marginTop: 14 }}>Reading the chain…</span>
             </div>
           ) : query || filter !== "ALL" ? (
-            <EmptyState icon="search" title="Nothing matches yet." body="No signals fit this filter right now. Seer is still watching — try ALL, or clear your search." cta="Clear filters" onCta={() => { setFilter("ALL"); setQuery(""); }} />
+            <EmptyState icon="search" title="Nothing matches yet." body="No signals fit this filter right now. Seer is still watching - try ALL, or clear your search." cta="Clear filters" onCta={() => { setFilter("ALL"); setQuery(""); }} />
           ) : (
             <EmptyState icon="eye" title="Seer is watching." body="Signals will appear here the moment they are detected. Nothing escapes a patient eye." />
           )

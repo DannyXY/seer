@@ -1,5 +1,5 @@
 /* ============================================================
-   SEER — Tweaks (accent / canvas / motion)  ·  "Instrument"
+   SEER - Tweaks (accent / canvas / motion)  ·  "Instrument"
    Runtime source of truth for the brand tokens. Applied on load
    so the whole app + landing render in the Instrument system.
    ============================================================ */
@@ -20,7 +20,7 @@ const SEER_CANVAS = {
   Black:    { dark:1, paper:"#000000", sink:"#000000", card:"#0E0F12", card2:"#16171B", line:"#26282E", lineSoft:"#1B1C20", ink:"#F4F6FA", ink2:"#8C929C", ink3:"#585E68", track:"#1B1D22", skel1:"#0E0F12", skel2:"#16171B", scroll:"#26282E", scrollH:"#34373F", overlay:"rgba(255,255,255,0.06)" },
 };
 
-// the signal spectrum stays fixed regardless of the chosen accent —
+// the signal spectrum stays fixed regardless of the chosen accent -
 // ALPHA is azure (a reading), never the voltage instrument color.
 const SEER_ALPHA = { c: "#4E9BFF", wash: "rgba(78,155,255,0.14)" };
 

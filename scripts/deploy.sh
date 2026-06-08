@@ -62,27 +62,32 @@ deploy() {
 echo "Deploying SeerArenaPoints..."
 ARENA_POINTS=$(deploy "contract/SeerArenaPoints.sol:SeerArenaPoints")
 echo "  SeerArenaPoints: $ARENA_POINTS"
+sleep 5
 
 # ── 2. SeerIdentitySBT ───────────────────────────────────────────────────────
 echo "Deploying SeerIdentitySBT..."
 IDENTITY_SBT=$(deploy "contract/SeerIdentitySBT.sol:SeerIdentitySBT" "$BACKEND_SIGNER")
 echo "  SeerIdentitySBT: $IDENTITY_SBT"
+sleep 5
 
 # ── 3. SeerIntentRegistry ────────────────────────────────────────────────────
 echo "Deploying SeerIntentRegistry..."
 INTENT_REGISTRY=$(deploy "contract/SeerIntentRegistry.sol:SeerIntentRegistry" "$BACKEND_SIGNER")
 echo "  SeerIntentRegistry: $INTENT_REGISTRY"
+sleep 5
 
 # ── 4. SeerPredictionRegistry ────────────────────────────────────────────────
 echo "Deploying SeerPredictionRegistry..."
 PREDICTION_REGISTRY=$(deploy "contract/SeerPredictionRegistry.sol:SeerPredictionRegistry" "$ARENA_POINTS" "$RESOLVER")
 echo "  SeerPredictionRegistry: $PREDICTION_REGISTRY"
+sleep 5
 
 # ── 5. Wire SeerArenaPoints → SeerPredictionRegistry ─────────────────────────
 echo "Wiring SeerArenaPoints.setArena($PREDICTION_REGISTRY)..."
 cast send \
   --rpc-url "$RPC_URL" \
   --private-key "$PRIVATE_KEY" \
+  --confirmations 1 \
   "$ARENA_POINTS" \
   "setArena(address)" \
   "$PREDICTION_REGISTRY"

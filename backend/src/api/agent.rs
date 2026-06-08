@@ -235,6 +235,14 @@ pub async fn create_intent(
     })))
 }
 
+/// Extract the raw intent text from a metadataURI of the form:
+///   data:application/json,{"intent":"<raw>","wallet":"<addr>"}
+fn parse_raw_intent_from_metadata_uri(uri: &str) -> Option<String> {
+    let json_str = uri.strip_prefix("data:application/json,")?;
+    let v: serde_json::Value = serde_json::from_str(json_str).ok()?;
+    v.get("intent").and_then(|s| s.as_str()).map(|s| s.to_string())
+}
+
 fn parse_rpc_u256(value: &str) -> anyhow::Result<U256> {
     let trimmed = value.trim();
     let digits = trimmed.strip_prefix("0x").unwrap_or(trimmed);
@@ -331,11 +339,27 @@ pub async fn intents(
         }
     }
 
-    // 2. Merge on-chain intent IDs so each intent knows its on-chain anchor
+    // 2. Fetch on-chain IntentRegistered events.
+    //    - For intents already in local store: just back-fill the onchain_id.
+    //    - For intents missing locally (e.g. fresh deployment / different instance):
+    //      reconstruct a stub from the metadataURI embedded in the event.
     if state.services.contracts.rpc_configured() {
-        if let Ok(onchain) = state.services.contracts.get_registered_intents_onchain(&address).await {
-            for (onchain_id, hash_hex) in onchain {
-                state.services.agent.set_onchain_id_by_hash(&hash_hex, onchain_id);
+        if let Ok(onchain) = state
+            .services
+            .contracts
+            .get_registered_intents_onchain(&address)
+            .await
+        {
+            for (onchain_id, hash_hex, metadata_uri) in onchain {
+                // Extract raw_intent from the data:application/json,{...} URI
+                let raw_intent = parse_raw_intent_from_metadata_uri(&metadata_uri)
+                    .unwrap_or_else(|| metadata_uri.clone());
+                state.services.agent.seed_intent_from_chain(
+                    onchain_id,
+                    hash_hex,
+                    raw_intent,
+                    address.clone(),
+                );
             }
         }
     }
@@ -595,7 +619,42 @@ pub async fn pause(
     persist_agent_intent(state.services.infra.postgres.as_ref(), &intent)
         .await
         .map_err(|err| ApiError::Service(err.to_string()))?;
-    Ok(Json(json!({ "intent": intent })))
+
+    // Return on-chain calldata so the frontend can anchor the pause on-chain.
+    let calldata = intent.onchain_intent_id.and_then(|oid| {
+        state.services.contracts.pause_intent_calldata(oid)
+            .map(|(to, data)| json!({ "to": to, "data": data, "chain_id": state.services.contracts.chain_id }))
+    });
+
+    Ok(Json(json!({ "intent": intent, "calldata": calldata })))
+}
+
+pub async fn resume(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(intent_id): Path<Uuid>,
+) -> Result<Json<Value>, ApiError> {
+    let existing = state
+        .services
+        .agent
+        .get_intent(intent_id)
+        .ok_or(ApiError::NotFound)?;
+    require_wallet(&state, &headers, &existing.wallet_address)?;
+    let intent = state
+        .services
+        .agent
+        .update_status(intent_id, IntentStatus::Active)
+        .ok_or(ApiError::NotFound)?;
+    persist_agent_intent(state.services.infra.postgres.as_ref(), &intent)
+        .await
+        .map_err(|err| ApiError::Service(err.to_string()))?;
+
+    let calldata = intent.onchain_intent_id.and_then(|oid| {
+        state.services.contracts.resume_intent_calldata(oid)
+            .map(|(to, data)| json!({ "to": to, "data": data, "chain_id": state.services.contracts.chain_id }))
+    });
+
+    Ok(Json(json!({ "intent": intent, "calldata": calldata })))
 }
 
 pub async fn stop(
@@ -617,5 +676,11 @@ pub async fn stop(
     persist_agent_intent(state.services.infra.postgres.as_ref(), &intent)
         .await
         .map_err(|err| ApiError::Service(err.to_string()))?;
-    Ok(Json(json!({ "intent": intent })))
+
+    let calldata = intent.onchain_intent_id.and_then(|oid| {
+        state.services.contracts.cancel_intent_calldata(oid)
+            .map(|(to, data)| json!({ "to": to, "data": data, "chain_id": state.services.contracts.chain_id }))
+    });
+
+    Ok(Json(json!({ "intent": intent, "calldata": calldata })))
 }

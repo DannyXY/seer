@@ -1,5 +1,5 @@
 /* ============================================================
-   SEER — backend data layer
+   SEER - backend data layer
    Keeps the approved window.SEER shapes while sourcing data from
    the Rust API. No mock banks, no random simulation.
    ============================================================ */
@@ -28,7 +28,7 @@
     strategist: {
       name: "The Strategist", roman: "VII",
       tagline: "Patience is a position.",
-      reading: "You move late and you move heavy. Seer reads a wallet that waits for confirmation, then commits without flinching — the rarest discipline on-chain.",
+      reading: "You move late and you move heavy. Seer reads a wallet that waits for confirmation, then commits without flinching - the rarest discipline on-chain.",
       hue: 232,
     },
     yieldvampire: {
@@ -40,7 +40,7 @@
     diamondhand: {
       name: "The Diamond Hand", roman: "IX",
       tagline: "Conviction outlasts the storm.",
-      reading: "You held through drawdowns that shook everyone else out. Seer reads stillness where others read fear — a wallet that does not blink.",
+      reading: "You held through drawdowns that shook everyone else out. Seer reads stillness where others read fear - a wallet that does not blink.",
       hue: 200,
     },
     contrarian: {
@@ -279,7 +279,7 @@
 
     const percentile = Number(identity.percentile ?? 0);
 
-    // Protocol breakdown from protocols_used — real names from backend
+    // Protocol breakdown from protocols_used - real names from backend
     const protocolNames = Array.isArray(statsObj.protocols_used) ? statsObj.protocols_used : [];
     const protocols = protocolNames.map((name) => ({
       name,
@@ -439,7 +439,7 @@
       if (!wallet) throw new Error("Connect a wallet to load Seer.");
       update({ loading: true, error: null });
       try {
-        // Fire signals fetch in background — don't block ready state on it
+        // Fire signals fetch in background - don't block ready state on it
         SeerAPI.loadPublic().catch(() => update({ signalsLoading: false }));
 
         const [summary, risk, intentsRes, identity, entriesRes, leaderboardRes, settingsRes, onchainPoints] = await Promise.all([
@@ -524,7 +524,7 @@
         body: JSON.stringify({ wallet_address: state.wallet, raw_intent: raw }),
       });
       const intent = adaptIntent(res.intent);
-      // NOTE: store is NOT updated here — caller must call commitIntent(intent)
+      // NOTE: store is NOT updated here - caller must call commitIntent(intent)
       // after the on-chain tx is signed so the rail only shows confirmed intents.
       return {
         intent,
@@ -570,7 +570,7 @@
     async mintIdentity() {
       const res = await request(`/api/identity/${state.wallet}/mint-metadata`, { method: "POST" });
       if (!res.contract_configured) {
-        throw new Error("SBT contract not configured on backend — set IDENTITY_SBT_ADDRESS.");
+        throw new Error("SBT contract not configured on backend - set IDENTITY_SBT_ADDRESS.");
       }
       const token = res.token_id ? String(res.token_id).padStart(4, "0") : "";
       const next = { ...state.IDENTITY, sbt: { minted: !!res.minted, token } };

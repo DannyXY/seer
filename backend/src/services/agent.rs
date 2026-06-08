@@ -192,6 +192,66 @@ impl AgentService {
         }
     }
 
+    /// Reconstruct and seed an intent from on-chain event data when it is
+    /// absent from both memory and the database (e.g. fresh deployment or
+    /// a different backend instance).  If an intent with the same hash
+    /// already exists it is left untouched — only the onchain_id is updated.
+    pub fn seed_intent_from_chain(
+        &self,
+        onchain_id: u64,
+        hash_hex: String,
+        raw_intent: String,
+        wallet_address: String,
+    ) {
+        // If the intent already exists locally just make sure the ID is linked.
+        {
+            let store = self.intents.read().expect("agent intent store poisoned");
+            let clean = hash_hex.trim_start_matches("0x");
+            if store.values().any(|i| {
+                i.intent_hash
+                    .trim_start_matches("0x")
+                    .eq_ignore_ascii_case(clean)
+            }) {
+                drop(store);
+                self.set_onchain_id_by_hash(&hash_hex, onchain_id);
+                return;
+            }
+        }
+
+        // Build a minimal ParsedIntent stub — we don't run Claude again for
+        // recovery; the raw intent text is preserved verbatim.
+        let parsed = ParsedIntent {
+            action: raw_intent.clone(),
+            target_assets: vec![],
+            target_protocols: vec![],
+            spend_amount: None,
+            trigger: IntentTrigger {
+                mode: IntentExecutionMode::Instant,
+                schedule: None,
+                conditions: vec![],
+            },
+            constraints: vec![],
+            requires_user_signature: true,
+        };
+
+        let intent = AgentIntent {
+            id: Uuid::new_v4(),
+            wallet_address,
+            raw_intent,
+            parsed_intent: parsed,
+            status: IntentStatus::Active,
+            intent_hash: hash_hex,
+            onchain_intent_id: Some(onchain_id),
+            created_at: Utc::now(),
+        };
+
+        self.intents
+            .write()
+            .expect("agent intent store poisoned")
+            .entry(intent.id)
+            .or_insert(intent);
+    }
+
     pub fn list_intents(&self, wallet_address: &str) -> Vec<AgentIntent> {
         self.intents
             .read()
