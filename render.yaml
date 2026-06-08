@@ -40,7 +40,7 @@ services:
           property: connectionString
 
       - key: RUN_MIGRATIONS
-        value: false
+        value: true
       - key: DEFILLAMA_ENABLED
         value: true
       - key: NANSEN_SMART_MONEY_CHAINS
