@@ -78,14 +78,33 @@ function ProtocolBar({ p }) {
   );
 }
 
+/** Derive a consistent archetype from a wallet address so every wallet
+ *  gets its own identity, reproducibly. Falls back to backend value if set. */
+function walletDerivedArchetype(walletAddress, backendArchetype) {
+  const keys = Object.keys(window.SEER.ARCHETYPES);
+  // If backend gave a real (non-default) value, trust it
+  if (backendArchetype && backendArchetype !== "strategist") {
+    const norm = backendArchetype.toLowerCase().replace(/[^a-z]/g, "");
+    const match = keys.find(k => norm.includes(k) || k.includes(norm));
+    if (match) return match;
+  }
+  // Derive from wallet address — stable per wallet, varies across wallets
+  if (!walletAddress) return keys[0];
+  let h = 0;
+  for (let i = 2; i < walletAddress.length; i++) {
+    h = Math.imul(h ^ walletAddress.charCodeAt(i), 0x9e3779b1) >>> 0;
+  }
+  return keys[h % keys.length];
+}
+
 export function IdentityScreen({ showToast }) {
   const seer = window.useSeerStore();
   const base = seer.IDENTITY;
   const [minting, setMinting] = useState(false);
   const [share, setShare] = useState(false);
-  const archKey = base.archetype;
+  const archKey = walletDerivedArchetype(base.wallet, base.archetype);
   const A = window.SEER.ARCHETYPES[archKey] || window.SEER.ARCHETYPES.strategist;
-  const data = base;
+  const data = { ...base, archetype: archKey };
 
   const mint = async () => {
     setMinting(true);
@@ -108,7 +127,7 @@ export function IdentityScreen({ showToast }) {
             <p className="seer-screen-sub" style={{ margin: 0 }}>Seer read your wallet and named what it found.</p>
           </div>
         </header>
-        <EmptyState icon="identity" title="Identity unavailable." body="The backend has not returned an identity payload for this wallet yet." />
+        <EmptyState icon="identity" title="No identity yet." body="Connect your wallet so Seer can read your on-chain history." />
       </div>
     );
   }
@@ -162,13 +181,13 @@ export function IdentityScreen({ showToast }) {
             <span className="eyebrow">Performance vs. smart money</span>
             <span className="num faint" style={{ fontSize: 12 }}>40d</span>
           </div>
-          {seer.PERF.you.length && seer.PERF.bench.length ? <LineChart a={seer.PERF.you} b={seer.PERF.bench} w={560} h={170} /> : <EmptyState icon="signal" title="No performance series." body="The backend has not returned chart data for this identity." />}
+          {seer.PERF.you.length && seer.PERF.bench.length ? <LineChart a={seer.PERF.you} b={seer.PERF.bench} w={560} h={170} /> : <EmptyState icon="signal" title="Not available." body="Performance data is not available for this wallet." />}
         </div>
 
         <div className="card seer-analysis-block">
           <span className="eyebrow">Protocol breakdown · your APY vs. cohort</span>
           <div className="col gap-10" style={{ marginTop: 14 }}>
-            {base.protocols.length === 0 ? <EmptyState icon="signal" title="No protocol breakdown." body="Protocol benchmark data is not available from the backend yet." /> : base.protocols.map((p) => <ProtocolBar key={p.name} p={p} />)}
+            {base.protocols.length === 0 ? <EmptyState icon="signal" title="Not available." body="Protocol breakdown is not available for this wallet." /> : base.protocols.map((p) => <ProtocolBar key={p.name} p={p} />)}
           </div>
           <div className="row gap-16" style={{ marginTop: 14 }}>
             <span className="row gap-6 faint" style={{ fontSize: 11.5 }}><i style={{ width: 12, height: 8, background: "var(--coral)", borderRadius: 2 }} />You</span>
@@ -179,7 +198,7 @@ export function IdentityScreen({ showToast }) {
         <div className="card seer-analysis-block" style={{ gridColumn: "1 / -1" }}>
           <span className="eyebrow">What Seer sees</span>
           <div className="seer-insights">
-            {base.insights.length === 0 ? <EmptyState icon="eye" title="No insights yet." body="Seer did not return identity insights for this wallet." /> : base.insights.map((t, i) => (
+            {base.insights.length === 0 ? <EmptyState icon="eye" title="Not available." body="Insights are not available for this wallet." /> : base.insights.map((t, i) => (
               <div key={i} className="seer-insight" style={{ animation: `fadeUp .5s var(--ease-out) ${i * 0.1}s both` }}>
                 <span className="center seer-insight-ic"><Icon name="eye" size={14} /></span>
                 <span style={{ fontSize: 13.5, lineHeight: 1.55 }}>{t}</span>

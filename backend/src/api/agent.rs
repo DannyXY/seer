@@ -209,13 +209,12 @@ pub async fn create_intent(
 ) -> Result<Json<Value>, ApiError> {
     require_wallet(&state, &headers, &req.wallet_address)?;
     let intent = state.services.agent.create_intent(req);
-    persist_agent_intent(state.services.infra.postgres.as_ref(), &intent)
-        .await
-        .map_err(|err| ApiError::Service(err.to_string()))?;
+    // Persistence is intentionally skipped here — intents are recovered from
+    // on-chain IntentRegistered events after the user broadcasts the calldata.
+    // DB-persisting before the on-chain tx is confirmed creates orphaned rows
+    // and FK conflicts with execution_policies that reference a UUID that may
+    // never be anchored on-chain.
     let policy = state.services.agent.create_policy(&intent);
-    persist_agent_execution_policy(state.services.infra.postgres.as_ref(), &policy)
-        .await
-        .map_err(|err| ApiError::Service(err.to_string()))?;
 
     // Build calldata for user to anchor the intent on-chain via SeerIntentRegistry.
     let metadata_uri = format!(
