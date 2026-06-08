@@ -12,6 +12,7 @@
 set -euo pipefail
 
 RPC_URL="${RPC_URL:-https://rpc.sepolia.mantle.xyz}"
+VERIFIER_URL="${VERIFIER_URL:-https://explorer.sepolia.mantle.xyz/api?}"
 
 # ── Input validation ──────────────────────────────────────────────────────────
 if [[ -z "${PRIVATE_KEY:-}" ]]; then
@@ -58,29 +59,60 @@ deploy() {
   grep "Deployed to:" <<< "$output" | awk '{print $3}'
 }
 
+# Helper: verify a deployed contract on Mantle Explorer (Blockscout).
+# Usage: verify <address> <contract-path>:<ContractName> [constructor args (hex-encoded)]
+verify() {
+  local address="$1"
+  local contract="$2"
+  local constructor_args="${3:-}"
+  echo "  Verifying $contract at $address..."
+  local args=(
+    --rpc-url "$RPC_URL"
+    --verifier blockscout
+    --verifier-url "$VERIFIER_URL"
+    "$address"
+    "$contract"
+  )
+  if [[ -n "$constructor_args" ]]; then
+    args+=(--constructor-args "$constructor_args")
+  fi
+  if forge verify-contract "${args[@]}" 2>&1; then
+    echo "  Verified."
+  else
+    echo "  WARNING: verification failed — you can retry manually later." >&2
+  fi
+}
+
 # ── 1. SeerArenaPoints ────────────────────────────────────────────────────────
 echo "Deploying SeerArenaPoints..."
 ARENA_POINTS=$(deploy "contract/SeerArenaPoints.sol:SeerArenaPoints")
 echo "  SeerArenaPoints: $ARENA_POINTS"
 sleep 5
+verify "$ARENA_POINTS" "contract/SeerArenaPoints.sol:SeerArenaPoints"
 
 # ── 2. SeerIdentitySBT ───────────────────────────────────────────────────────
 echo "Deploying SeerIdentitySBT..."
 IDENTITY_SBT=$(deploy "contract/SeerIdentitySBT.sol:SeerIdentitySBT" "$BACKEND_SIGNER")
 echo "  SeerIdentitySBT: $IDENTITY_SBT"
 sleep 5
+verify "$IDENTITY_SBT" "contract/SeerIdentitySBT.sol:SeerIdentitySBT" \
+  "$(cast abi-encode 'constructor(address)' "$BACKEND_SIGNER")"
 
 # ── 3. SeerIntentRegistry ────────────────────────────────────────────────────
 echo "Deploying SeerIntentRegistry..."
 INTENT_REGISTRY=$(deploy "contract/SeerIntentRegistry.sol:SeerIntentRegistry" "$BACKEND_SIGNER")
 echo "  SeerIntentRegistry: $INTENT_REGISTRY"
 sleep 5
+verify "$INTENT_REGISTRY" "contract/SeerIntentRegistry.sol:SeerIntentRegistry" \
+  "$(cast abi-encode 'constructor(address)' "$BACKEND_SIGNER")"
 
 # ── 4. SeerPredictionRegistry ────────────────────────────────────────────────
 echo "Deploying SeerPredictionRegistry..."
 PREDICTION_REGISTRY=$(deploy "contract/SeerPredictionRegistry.sol:SeerPredictionRegistry" "$ARENA_POINTS" "$RESOLVER")
 echo "  SeerPredictionRegistry: $PREDICTION_REGISTRY"
 sleep 5
+verify "$PREDICTION_REGISTRY" "contract/SeerPredictionRegistry.sol:SeerPredictionRegistry" \
+  "$(cast abi-encode 'constructor(address,address)' "$ARENA_POINTS" "$RESOLVER")"
 
 # ── 5. Wire SeerArenaPoints → SeerPredictionRegistry ─────────────────────────
 echo "Wiring SeerArenaPoints.setArena($PREDICTION_REGISTRY)..."

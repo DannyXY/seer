@@ -11,12 +11,24 @@ pub async fn summary(
     Path(address): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     let provider = state.services.provider.provider().await;
-    let summary = state
+    let mut summary = state
         .services
         .wallet
         .summary(provider, &address)
         .await
         .map_err(|err| ApiError::Service(err.to_string()))?;
+
+    // Prepend live MNT balance fetched directly from Mantle RPC.
+    if let Ok((_, mnt_amount)) = state.services.contracts.get_native_balance(&address).await {
+        let mnt_position = crate::models::provider::PortfolioPosition {
+            symbol: "MNT".to_string(),
+            amount: format!("{:.6}", mnt_amount),
+            usd_value: 0.0,
+            protocol: None,
+        };
+        summary.balances.insert(0, mnt_position);
+    }
+
     Ok(Json(json!(summary)))
 }
 

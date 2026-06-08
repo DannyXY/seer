@@ -607,6 +607,27 @@ impl ContractService {
         Ok(bytes.last().copied().unwrap_or(0) != 0)
     }
 
+    /// Fetch the native MNT balance for `wallet` via `eth_getBalance` on Mantle RPC.
+    /// Returns (raw_wei_as_string, human_readable_mnt, usd_value_placeholder).
+    pub async fn get_native_balance(&self, wallet: &str) -> anyhow::Result<(String, f64)> {
+        let rpc_url = self
+            .rpc_url
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("MANTLE_RPC_URL not configured"))?;
+        let response = self
+            .rpc_call(rpc_url, "eth_getBalance", serde_json::json!([wallet, "latest"]))
+            .await?;
+        let hex = response
+            .get("result")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("eth_getBalance missing result"))?;
+        let wei = u128::from_str_radix(hex.trim_start_matches("0x"), 16)
+            .unwrap_or(0);
+        // MNT has 18 decimals
+        let mnt = wei as f64 / 1e18;
+        Ok((hex.to_string(), mnt))
+    }
+
     /// Backend-signed: call `SeerPredictionRegistry.createPrediction()`, return on-chain prediction ID.
     pub async fn create_prediction_on_chain(
         &self,
