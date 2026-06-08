@@ -10,15 +10,9 @@ services:
         destination: /index.html
     envVars:
       - key: VITE_API_URL
-        fromService:
-          type: web
-          name: seer-api
-          property: hostURL
+        sync: false
       - key: VITE_API_BASE
-        fromService:
-          type: web
-          name: seer-api
-          property: hostURL
+        sync: false
       - key: VITE_PRIVY_APP_ID
         value: cmq471x3900dv0bl7l3h6qwvw
       - key: VITE_PIMLICO_API_KEY
