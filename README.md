@@ -4,14 +4,17 @@ Seer is a wallet intelligence and prediction system for the Mantle Turing Test H
 
 ## Deployed Contracts (Mantle Sepolia Testnet)
 
-| Contract | Address |
-|---|---|
-| SeerArenaPoints | `0x2B8cCC79007a66053eA081786A886174CD548eEd` |
+| Contract               | Address                                      |
+| ---------------------- | -------------------------------------------- |
+| SeerArenaPoints        | `0x2B8cCC79007a66053eA081786A886174CD548eEd` |
 | SeerPredictionRegistry | `0x1E255E1C5A18d79F4ee1FF7a5BC9dB7e542e68e8` |
-| SeerIdentitySBT | `0x1B46bb805a6707449B27C95175D0a2ff07Cb6BA2` |
-| SeerIntentRegistry | `0x71cE98dA05B66a19c1894d8d2ea0b81600D461D9` |
+| SeerIdentitySBT        | `0x1B46bb805a6707449B27C95175D0a2ff07Cb6BA2` |
+| SeerIntentRegistry     | `0x71cE98dA05B66a19c1894d8d2ea0b81600D461D9` |
 
 All four contracts are verified on [Mantle Sepolia Explorer](https://explorer.sepolia.mantle.xyz).
+
+Frontend URL: https://seer-mantle.onrender.com/
+Backend URL: https://seer-api-7mlt.onrender.com
 
 ## Architecture
 
