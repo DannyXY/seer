@@ -15,19 +15,11 @@ use crate::{
 };
 
 pub async fn predictions(State(state): State<AppState>) -> Json<Value> {
-    // Restore from DB on cache miss (e.g. after server restart).
-    // If DB is empty, persist the in-memory seed prediction so it survives future restarts.
-    let current_preds = state.services.arena.predictions();
-    if current_preds.len() == 1 {
-        // Exactly the in-memory seed — try to upsert it into DB so future restarts load it.
-        let _ = persist_arena_prediction(
-            state.services.infra.postgres.as_ref(), &current_preds[0]
-        ).await;
-    } else if current_preds.is_empty() {
-        if let Ok(db_preds) = load_arena_predictions(state.services.infra.postgres.as_ref()).await {
-            if !db_preds.is_empty() {
-                state.services.arena.seed_predictions(db_preds);
-            }
+    // Merge from DB on every read so predictions created by the worker process
+    // or a previous run are always visible (seeding never overwrites in-memory state).
+    if let Ok(db_preds) = load_arena_predictions(state.services.infra.postgres.as_ref()).await {
+        if !db_preds.is_empty() {
+            state.services.arena.seed_predictions(db_preds);
         }
     }
 
@@ -253,37 +245,8 @@ pub async fn on_chain_points(
 }
 
 pub async fn resolve_due(State(state): State<AppState>) -> Json<Value> {
-    let provider = state.services.provider.provider().await;
-
-    // Build a metric lookup: fetch TVL for any "protocol.tvl_usd:<name>" metric key.
-    // We collect everything upfront (async) before the sync resolve call.
-    let predictions = state.services.arena.predictions();
-    let expired_metrics: std::collections::HashMap<String, f64> = {
-        let mut map = std::collections::HashMap::new();
-        for prediction in &predictions {
-            if map.contains_key(&prediction.metric) {
-                continue;
-            }
-            // Metric format: "protocol.tvl_usd:<ProtocolName>" or bare metric name.
-            let protocol_name = prediction
-                .metric
-                .split(':')
-                .nth(1)
-                .unwrap_or(&prediction.metric);
-            if let Ok(metrics) = provider.get_protocol_metrics(protocol_name).await {
-                map.insert(prediction.metric.clone(), metrics.tvl_usd);
-            }
-        }
-        map
-    };
-
-    let resolved_ids = state
-        .services
-        .arena
-        .resolve_expired(|metric_key| expired_metrics.get(metric_key).copied());
-
-    Json(json!({
-        "resolved": resolved_ids,
-        "contract_configured": state.services.contracts.is_configured(),
-    }))
+    let summary = crate::jobs::arena::resolve_due_predictions(&state).await;
+    let mut body = summary.to_json();
+    body["contract_configured"] = json!(state.services.contracts.is_configured());
+    Json(body)
 }

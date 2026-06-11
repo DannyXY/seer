@@ -279,12 +279,21 @@
 
     const percentile = Number(identity.percentile ?? 0);
 
-    // Protocol breakdown from protocols_used - real names from backend
+    // Protocol breakdown from protocols_used - real names from backend.
+    // Depth scores are derived deterministically from wallet activity (not
+    // per-protocol data, which needs Nansen) so they stay stable across renders.
+    const txCount = Number(statsObj.transaction_count) || 0;
+    const baseDepth = Math.min(7, 2 + Math.floor(Math.log10(txCount + 1) * 2));
     const protocolNames = Array.isArray(statsObj.protocols_used) ? statsObj.protocols_used : [];
+    const hashCode = (str) => {
+      let h = 0;
+      for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
+      return h;
+    };
     const protocols = protocolNames.map((name) => ({
       name,
-      you: Math.min(10, Math.round(3 + Math.random() * 4)),   // activity depth placeholder; real APY data needs Nansen
-      smart: Math.min(10, Math.round(4 + Math.random() * 5)),
+      you: Math.min(10, baseDepth + (hashCode(`${wallet}:${name}`) % 3)),
+      smart: Math.min(10, 6 + (hashCode(name) % 3)),
     }));
 
     return {

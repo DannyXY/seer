@@ -657,6 +657,70 @@ impl ContractService {
         Ok(prediction_id)
     }
 
+    /// Backend-signed: call `SeerPredictionRegistry.resolvePrediction()`.
+    /// `outcome`: 0 = Void, 1 = SeerCorrect, 2 = SeerIncorrect (contract enum order).
+    pub async fn resolve_prediction_on_chain(
+        &self,
+        onchain_prediction_id: u64,
+        outcome: u8,
+        final_value: u64,
+    ) -> anyhow::Result<String> {
+        let to = self.prediction_registry_address.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("SEER_PREDICTION_REGISTRY_ADDRESS not configured"))?;
+        let to_addr = Address::from_str(to)?;
+
+        let mut calldata = id("resolvePrediction(uint256,uint8,uint256)")[..4].to_vec();
+        calldata.extend(encode(&[
+            Token::Uint(U256::from(onchain_prediction_id)),
+            Token::Uint(U256::from(outcome)),
+            Token::Uint(U256::from(final_value)),
+        ]));
+
+        let tx_hash = self.sign_and_send_tx(to_addr, calldata).await?;
+        self.wait_for_receipt_success(&tx_hash).await?;
+        Ok(tx_hash)
+    }
+
+    /// Backend-signed: call `SeerPredictionRegistry.settleEntry()` to release a
+    /// user's locked points after the prediction has been resolved on-chain.
+    pub async fn settle_entry_on_chain(
+        &self,
+        onchain_prediction_id: u64,
+        user: &str,
+    ) -> anyhow::Result<String> {
+        let to = self.prediction_registry_address.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("SEER_PREDICTION_REGISTRY_ADDRESS not configured"))?;
+        let to_addr = Address::from_str(to)?;
+        let user_addr = Address::from_str(user)?;
+
+        let mut calldata = id("settleEntry(uint256,address)")[..4].to_vec();
+        calldata.extend(encode(&[
+            Token::Uint(U256::from(onchain_prediction_id)),
+            Token::Address(user_addr),
+        ]));
+
+        let tx_hash = self.sign_and_send_tx(to_addr, calldata).await?;
+        self.wait_for_receipt_success(&tx_hash).await?;
+        Ok(tx_hash)
+    }
+
+    /// Poll for a transaction receipt and fail if the transaction reverted.
+    async fn wait_for_receipt_success(&self, tx_hash: &str) -> anyhow::Result<()> {
+        let rpc_url = self.rpc_url.as_ref().ok_or_else(|| anyhow::anyhow!("no rpc"))?;
+        for _ in 0..30 {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            let response = self.rpc_call(rpc_url, "eth_getTransactionReceipt", json!([tx_hash])).await?;
+            let Some(receipt) = response.get("result").filter(|v| !v.is_null()) else {
+                continue;
+            };
+            return match receipt.get("status").and_then(Value::as_str) {
+                Some("0x1") => Ok(()),
+                status => anyhow::bail!("transaction {tx_hash} failed with status {status:?}"),
+            };
+        }
+        anyhow::bail!("timed out waiting for receipt of tx {tx_hash}")
+    }
+
     /// Sign and send a backend-authorized transaction. Returns tx hash.
     async fn sign_and_send_tx(&self, to: Address, calldata: Vec<u8>) -> anyhow::Result<String> {
         let rpc_url = self.rpc_url.as_ref().ok_or_else(|| anyhow::anyhow!("MANTLE_RPC_URL not configured"))?;

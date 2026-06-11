@@ -767,6 +767,50 @@ pub async fn persist_arena_entry(
     Ok(())
 }
 
+/// Load every arena entry. Used by the resolution job so entries created
+/// before a restart still settle and persist correctly.
+pub async fn load_all_arena_entries(pool: Option<&PgPool>) -> anyhow::Result<Vec<ArenaEntry>> {
+    use sqlx::Row;
+    let Some(pool) = pool else { return Ok(Vec::new()); };
+
+    let rows = sqlx::query(r#"
+        SELECT id, prediction_id, wallet_address, user_position,
+               points_committed, status, points_delta, tx_hash,
+               created_at, resolved_at
+        FROM arena_entries
+        ORDER BY created_at DESC
+    "#)
+    .fetch_all(pool)
+    .await?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        let pos_str: String = row.try_get("user_position")?;
+        let status_str: String = row.try_get("status")?;
+        let points_committed: i32 = row.try_get("points_committed")?;
+        out.push(ArenaEntry {
+            id: row.try_get("id")?,
+            prediction_id: row.try_get("prediction_id")?,
+            wallet_address: row.try_get("wallet_address")?,
+            user_position: match pos_str.as_str() {
+                "CHALLENGE_SEER" => ArenaPosition::ChallengeSeer,
+                _ => ArenaPosition::BackSeer,
+            },
+            points_committed: points_committed as u32,
+            status: match status_str.as_str() {
+                "RESOLVED" => ArenaEntryStatus::Resolved,
+                "CANCELLED" => ArenaEntryStatus::Cancelled,
+                _ => ArenaEntryStatus::Active,
+            },
+            points_delta: row.try_get("points_delta")?,
+            tx_hash: row.try_get("tx_hash")?,
+            created_at: row.try_get("created_at")?,
+            resolved_at: row.try_get("resolved_at")?,
+        });
+    }
+    Ok(out)
+}
+
 pub async fn load_entries_for_wallet(
     pool: Option<&PgPool>,
     wallet_address: &str,

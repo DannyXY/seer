@@ -1,3 +1,5 @@
+pub mod arena;
+
 use chrono::Utc;
 use serde_json::json;
 use tokio::time::{interval, MissedTickBehavior};
@@ -246,17 +248,81 @@ fn job_run_status_log_label(status: JobRunStatus) -> &'static str {
 }
 
 async fn run_arena_refresh_jobs(state: &AppState) {
+    let started_at = Utc::now();
+    let summary = arena::resolve_due_predictions(state).await;
+    let finished_at = Utc::now();
+
+    let status = if summary.errors.is_empty() {
+        JobRunStatus::Success
+    } else if summary.resolved.is_empty() {
+        JobRunStatus::Failed
+    } else {
+        JobRunStatus::PartialFailure
+    };
+    let job_run = JobRunRecord {
+        job_name: "arena_refresh".to_string(),
+        status,
+        provider: state.services.provider_name().to_string(),
+        summary: summary.to_json(),
+        started_at,
+        finished_at,
+        error: (!summary.errors.is_empty()).then(|| summary.errors.join("; ")),
+    };
+    if let Err(err) = persist_job_run(state.services.infra.postgres.as_ref(), &job_run).await {
+        tracing::warn!(error = %err, "failed to persist arena refresh job run");
+    }
+
     info!(
         provider = state.services.provider_name(),
-        jobs = "arena_metrics,resolve_due,leaderboard",
+        jobs = "arena_resolve_due",
+        resolved = summary.resolved.len(),
+        onchain_resolved = summary.onchain_resolved,
+        entries_settled = summary.entries_settled,
+        status = job_run_status_log_label(status),
         "job tick"
     );
 }
 
 async fn run_prediction_generation_jobs(state: &AppState) {
+    let started_at = Utc::now();
+    let result = arena::generate_prediction_if_needed(state).await;
+    let finished_at = Utc::now();
+
+    let (status, summary, error) = match &result {
+        Ok(Some(prediction)) => (
+            JobRunStatus::Success,
+            json!({ "generated": true, "prediction_id": prediction.id, "claim": prediction.claim }),
+            None,
+        ),
+        Ok(None) => (
+            JobRunStatus::Success,
+            json!({ "generated": false, "reason": "open prediction already exists" }),
+            None,
+        ),
+        Err(err) => (
+            JobRunStatus::Failed,
+            json!({ "generated": false }),
+            Some(err.to_string()),
+        ),
+    };
+    let job_run = JobRunRecord {
+        job_name: "arena_prediction_generation".to_string(),
+        status,
+        provider: state.services.provider_name().to_string(),
+        summary,
+        started_at,
+        finished_at,
+        error,
+    };
+    if let Err(err) = persist_job_run(state.services.infra.postgres.as_ref(), &job_run).await {
+        tracing::warn!(error = %err, "failed to persist prediction generation job run");
+    }
+
     info!(
         provider = state.services.provider_name(),
         jobs = "arena_prediction_generation",
+        generated = matches!(&result, Ok(Some(_))),
+        status = job_run_status_log_label(status),
         "job tick"
     );
 }

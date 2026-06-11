@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::RwLock;
 
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use uuid::Uuid;
 
 use crate::models::arena::{
@@ -18,9 +18,8 @@ pub struct ArenaService {
 
 impl ArenaService {
     pub fn new() -> Self {
-        let prediction = seed_prediction();
         Self {
-            predictions: std::sync::Arc::new(RwLock::new(HashMap::from([(prediction.id, prediction)]))),
+            predictions: std::sync::Arc::new(RwLock::new(HashMap::new())),
             entries: std::sync::Arc::new(RwLock::new(HashMap::new())),
             points: std::sync::Arc::new(RwLock::new(HashMap::new())),
         }
@@ -151,6 +150,16 @@ impl ArenaService {
         Ok(entry)
     }
 
+    pub fn entries_for_prediction(&self, prediction_id: Uuid) -> Vec<ArenaEntry> {
+        self.entries
+            .read()
+            .expect("arena entry store poisoned")
+            .values()
+            .filter(|entry| entry.prediction_id == prediction_id)
+            .cloned()
+            .collect()
+    }
+
     pub fn entries_for_wallet(&self, wallet_address: &str) -> Vec<ArenaEntry> {
         self.entries
             .read()
@@ -210,20 +219,6 @@ impl ArenaService {
             if let Some(delta) = entry.points_delta {
                 row.weekly_gain += delta;
             }
-        }
-
-        if rows_by_wallet.is_empty() {
-            rows_by_wallet.insert(
-                "0xsmart000000000000000000000000000000000001".to_string(),
-                LeaderboardRow {
-                    rank: 0,
-                    wallet_address: "0xsmart000000000000000000000000000000000001".to_string(),
-                    total_points: 1_240,
-                    weekly_gain: 240,
-                    accuracy_rate: Some(0.72),
-                    entries_count: 6,
-                },
-            );
         }
 
         let mut rows: Vec<_> = rows_by_wallet.into_values().collect();
@@ -378,28 +373,35 @@ impl ArenaService {
     }
 }
 
-fn seed_prediction() -> ArenaPrediction {
-    ArenaPrediction {
-        id: Uuid::from_u128(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa),
-        onchain_prediction_id: None,
-        claim: "mETH Protocol TVL will stay above $40M for the next 24 hours".to_string(),
-        metric: "protocol.tvl_usd:mETH Protocol".to_string(),
-        target_value: 40_000_000.0,
-        comparison_operator: ComparisonOperator::GreaterThanOrEqual,
-        expiry_time: Utc::now() + Duration::hours(24),
-        seer_position: ArenaPosition::BackSeer,
-        seer_confidence: 76,
-        reasoning: "Recent smart-money inflows and TVL momentum support this claim.".to_string(),
-        status: PredictionStatus::Open,
-        result: None,
-        final_value: None,
-        created_at: Utc::now(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Duration;
+
+    fn seed_prediction() -> ArenaPrediction {
+        ArenaPrediction {
+            id: Uuid::from_u128(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa),
+            onchain_prediction_id: None,
+            claim: "mETH Protocol TVL will stay above $40M for the next 24 hours".to_string(),
+            metric: "protocol.tvl_usd:mETH Protocol".to_string(),
+            target_value: 40_000_000.0,
+            comparison_operator: ComparisonOperator::GreaterThanOrEqual,
+            expiry_time: Utc::now() + Duration::hours(24),
+            seer_position: ArenaPosition::BackSeer,
+            seer_confidence: 76,
+            reasoning: "Recent smart-money inflows and TVL momentum support this claim.".to_string(),
+            status: PredictionStatus::Open,
+            result: None,
+            final_value: None,
+            created_at: Utc::now(),
+        }
+    }
+
+    fn service_with_seed() -> ArenaService {
+        let service = ArenaService::new();
+        service.seed_predictions(vec![seed_prediction()]);
+        service
+    }
 
     fn funded_request(wallet_address: &str) -> ArenaEntryRequest {
         ArenaEntryRequest {
@@ -416,7 +418,7 @@ mod tests {
 
     #[test]
     fn enters_prediction_and_lists_wallet_entries() {
-        let service = ArenaService::new();
+        let service = service_with_seed();
         let prediction_id = service.predictions()[0].id;
         fund(&service, "0xabc", 500);
 
@@ -431,7 +433,7 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_prediction_entry_for_same_wallet() {
-        let service = ArenaService::new();
+        let service = service_with_seed();
         let prediction_id = service.predictions()[0].id;
         fund(&service, "0xabc", 500);
 
@@ -445,7 +447,7 @@ mod tests {
 
     #[test]
     fn leaderboard_reflects_entered_wallet() {
-        let service = ArenaService::new();
+        let service = service_with_seed();
         let prediction_id = service.predictions()[0].id;
         fund(&service, "0xleader", 500);
 
