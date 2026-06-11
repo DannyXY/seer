@@ -55,12 +55,48 @@ fn safe_user_operation_readiness(state: &AppState, observed_chain_id: Option<u64
 }
 
 fn protocol_swap_readiness(state: &AppState, observed_chain_id: Option<u64>) -> Value {
-    let missing = missing_protocol_swap_requirements(state, observed_chain_id);
+    // Runnable means the transaction builder can emit calldata for the
+    // configured deposit function - not merely that an address is configured.
+    let execution = state.services.execution.readiness();
+    let mut missing = missing_protocol_swap_requirements(
+        observed_chain_id,
+        state.settings.mantle_chain_id,
+        &execution.configured_token_symbols,
+    );
+    let runnable: Vec<String> = execution
+        .protocols
+        .iter()
+        .filter(|protocol| protocol.ready_for_strategy_draft)
+        .map(|protocol| protocol.protocol.clone())
+        .collect();
+    let configured_not_runnable: Vec<Value> = execution
+        .protocols
+        .iter()
+        .filter(|protocol| protocol.strategy_address.is_some() && !protocol.signature_supported)
+        .map(|protocol| {
+            json!({
+                "protocol": protocol.protocol,
+                "deposit_function": protocol.deposit_function,
+                "reason": "configured function signature is not encodable by the transaction builder",
+            })
+        })
+        .collect();
+    let generic_strategy_runnable = execution.generic_strategy_address.is_some()
+        && crate::services::execution::deposit_signature_supported(
+            &execution.generic_deposit_function,
+        );
+    if runnable.is_empty() && !generic_strategy_runnable {
+        missing.push("a generic approved strategy or named protocol with a builder-supported deposit function");
+    }
+
     json!({
         "ready": missing.is_empty(),
         "missing": missing,
-        "supported_protocols": ["Agni Finance", "Merchant Moe", "Fluxion Network"],
-        "next_step": "Submit swap intent via /api/agent/evaluate-intent, confirm quote via QuoterV2/LBQuoter, then execute via user operation or signed transaction."
+        "generic_strategy_runnable": generic_strategy_runnable,
+        "runnable_protocols": runnable,
+        "configured_not_runnable": configured_not_runnable,
+        "supported_deposit_signatures": crate::services::execution::SUPPORTED_DEPOSIT_SIGNATURES,
+        "next_step": "Submit intent via /api/agent/evaluate-intent, simulate the draft via /api/contracts/simulate-transaction, then execute via user operation or signed transaction."
     })
 }
 
@@ -85,18 +121,21 @@ fn missing_safe_user_operation_requirements(
 }
 
 fn missing_protocol_swap_requirements(
-    state: &AppState,
     observed_chain_id: Option<u64>,
+    expected_chain_id: u64,
+    configured_token_symbols: &[String],
 ) -> Vec<&'static str> {
     let mut missing = Vec::new();
-    if observed_chain_id != Some(state.settings.mantle_chain_id) {
+    if observed_chain_id != Some(expected_chain_id) {
         missing.push("MANTLE_RPC_URL matching MANTLE_CHAIN_ID");
     }
-    if state.settings.mantle_usdt_address.is_none() {
-        missing.push("MANTLE_USDT_ADDRESS");
-    }
-    if state.settings.mantle_usdc_address.is_none() {
-        missing.push("MANTLE_USDC_ADDRESS");
+    if !configured_token_symbols
+        .iter()
+        .any(|symbol| symbol.eq_ignore_ascii_case("USDC"))
+    {
+        missing.push(
+            "execution token address for USDC (SEER_EXEC_TOKEN_ADDRESSES or MANTLE_USDC_ADDRESS)",
+        );
     }
     missing
 }

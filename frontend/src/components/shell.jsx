@@ -53,11 +53,37 @@ function Sidebar({ route, setRoute, onDisconnect, badge, collapsed, onToggle }) 
   );
 }
 
+function formatAssetAmount(asset) {
+  const value = Number(asset.bal || 0);
+  const symbol = String(asset.sym || "").toUpperCase();
+  const decimals = ["MNT", "WMNT", "METH", "CMETH", "WETH"].includes(symbol) ? 4 : 2;
+  return value.toLocaleString(undefined, { maximumFractionDigits: value >= 1000 ? 0 : decimals });
+}
+
 /* ---------- Right context rail ---------- */
-function RightRail({ setRoute, riskScore }) {
-  const { ASSETS, ACTIVE_INTENTS } = window.useSeerStore();
-  const totalUsd = ASSETS.reduce((s, a) => s + a.bal * a.usd, 0);
+function RightRail({ setRoute, riskScore, showToast }) {
+  const { ASSETS, MAINNET_ASSETS, TESTNET_ASSETS, SEER_TOKEN_FAUCET, ACTIVE_INTENTS } = window.useSeerStore();
+  const [balanceNetwork, setBalanceNetwork] = useState("mainnet");
+  const [faucetBusy, setFaucetBusy] = useState(false);
+  const mainnetAssets = MAINNET_ASSETS?.length ? MAINNET_ASSETS : (ASSETS || []);
+  const testnetAssets = TESTNET_ASSETS || [];
+  const visibleAssets = balanceNetwork === "testnet" ? testnetAssets : mainnetAssets;
+  const totalUsd = visibleAssets.reduce((s, a) => s + Number(a.bal || 0) * Number(a.usd || 0), 0);
   const intent = ACTIVE_INTENTS.find((i) => i.status === "RUNNING");
+
+  async function claimFaucet() {
+    if (!SEER_TOKEN_FAUCET || faucetBusy) return;
+    setFaucetBusy(true);
+    try {
+      const { txHash, faucet } = await window.SeerAPI.claimSeerTokens();
+      showToast?.(`${faucet.amount} ${faucet.token_symbol} faucet submitted.`, 'success', txHash);
+    } catch (err) {
+      showToast?.(err.message || "Faucet claim failed.", 'error');
+    } finally {
+      setFaucetBusy(false);
+    }
+  }
+
   return (
     <aside className="seer-rail">
       <div className="seer-rail-block">
@@ -65,20 +91,45 @@ function RightRail({ setRoute, riskScore }) {
           <span className="eyebrow">Wallet</span>
           <span className="num" style={{ fontSize: 12, color: "var(--ink-2)" }}>$<CountUp to={totalUsd} decimals={0} /></span>
         </div>
+        <div className="seer-balance-tabs" role="tablist" aria-label="Wallet balance network">
+          {["mainnet", "testnet"].map((network) => (
+            <button
+              key={network}
+              className={"seer-balance-tab" + (balanceNetwork === network ? " active" : "")}
+              role="tab"
+              aria-selected={balanceNetwork === network}
+              onClick={() => setBalanceNetwork(network)}
+            >
+              {network === "mainnet" ? "Mainnet" : "Testnet"}
+            </button>
+          ))}
+        </div>
         <div className="col gap-12">
-          {ASSETS.length === 0 ? <div className="mut" style={{ fontSize: 13 }}>No wallet positions returned yet.</div> : ASSETS.map((a) => (
-            <div key={a.sym} className="row gap-12">
+          {visibleAssets.length === 0 ? <div className="mut" style={{ fontSize: 13 }}>No {balanceNetwork} positions returned yet.</div> : visibleAssets.map((a) => (
+            <div key={`${balanceNetwork}:${a.sym}`} className="row gap-12">
               <span className="center seer-asset-ic">{a.sym[0]}</span>
               <div className="col" style={{ lineHeight: 1.25 }}>
                 <span style={{ fontSize: 13.5, fontWeight: 500 }}>{a.sym}</span>
                 <span className="faint" style={{ fontSize: 11.5, whiteSpace: "nowrap" }}>{a.name}</span>
               </div>
               <div className="col grow" style={{ alignItems: "flex-end", lineHeight: 1.25 }}>
-                <span className="num" style={{ fontSize: 13.5 }}>{a.bal.toLocaleString(undefined, { maximumFractionDigits: a.sym === "mETH" ? 2 : 0 })}</span>
+                <span className="num" style={{ fontSize: 13.5 }}>{formatAssetAmount(a)}</span>
               </div>
             </div>
           ))}
         </div>
+        {balanceNetwork === "testnet" && (
+          <button
+            className="seer-faucet-link"
+            disabled={!SEER_TOKEN_FAUCET || faucetBusy}
+            onClick={claimFaucet}
+            title={SEER_TOKEN_FAUCET ? "Claim Seer test USDC" : "Faucet is not configured for this environment"}
+          >
+            <span className="center seer-faucet-ic"><Icon name="bolt2" size={14} /></span>
+            <span className="seer-faucet-copy">{faucetBusy ? "Opening wallet..." : "Seer token faucet"}</span>
+            {SEER_TOKEN_FAUCET && <span className="seer-faucet-amt">+{SEER_TOKEN_FAUCET.amount} {SEER_TOKEN_FAUCET.token_symbol}</span>}
+          </button>
+        )}
       </div>
 
       <div className="seer-rail-block">
@@ -99,8 +150,8 @@ function RightRail({ setRoute, riskScore }) {
 
       <div className="seer-rail-block">
         <span className="eyebrow">Portfolio risk</span>
-        <div className="center" style={{ marginTop: 6 }}><RiskGauge score={riskScore} /></div>
-        <div className="faint" style={{ fontSize: 11.5, textAlign: "center", marginTop: -4 }}>Lower is safer · 0–100</div>
+        <div className="center seer-risk-gauge"><RiskGauge score={riskScore} /></div>
+        <div className="faint seer-risk-caption">Lower is safer · 0-100</div>
       </div>
 
       <button className="btn btn-primary" style={{ width: "100%", justifyContent: "center" }} onClick={() => setRoute("agent")}>

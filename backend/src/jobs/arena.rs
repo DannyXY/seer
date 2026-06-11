@@ -7,9 +7,41 @@ use crate::{
         load_all_arena_entries, load_arena_predictions, persist_arena_entry,
         persist_arena_prediction,
     },
-    models::arena::{ArenaPosition, ArenaPrediction, ComparisonOperator, PredictionStatus},
+    models::arena::{
+        ArenaEntry, ArenaPosition, ArenaPrediction, ComparisonOperator, PredictionStatus,
+    },
     AppState,
 };
+
+/// Send a Telegram alert to each entrant whose settings allow it.
+async fn notify_prediction_resolved(
+    state: &AppState,
+    prediction: &ArenaPrediction,
+    entries: &[ArenaEntry],
+) {
+    if !state.services.notifier.is_configured() {
+        return;
+    }
+    let result = prediction.result.as_deref().unwrap_or("Unresolved");
+    for entry in entries {
+        if !crate::jobs::telegram_alerts_enabled(state, &entry.wallet_address).await {
+            continue;
+        }
+        let delta = entry.points_delta.unwrap_or(0);
+        let text = format!(
+            "Seer Arena: \"{}\" resolved ({result}). Points change for {}: {delta:+}.",
+            prediction.claim, entry.wallet_address
+        );
+        if let Err(err) = state.services.notifier.send_message(&text).await {
+            tracing::warn!(
+                prediction_id = %prediction.id,
+                wallet_address = %entry.wallet_address,
+                error = %err,
+                "failed to send telegram alert for resolved prediction"
+            );
+        }
+    }
+}
 
 /// Contract enum order: 0 = Void, 1 = SeerCorrect, 2 = SeerIncorrect.
 const OUTCOME_SEER_CORRECT: u8 = 1;
@@ -50,13 +82,16 @@ pub async fn resolve_due_predictions(state: &AppState) -> ArenaResolutionSummary
     let now = Utc::now();
     let mut errors = Vec::new();
 
-    // Fetch final metric values only for predictions that are due.
+    // Fetch final metric values only for predictions that are due. The grace
+    // buffer keeps the on-chain resolvePrediction call (which checks
+    // block.timestamp >= expiryTime) from racing the local clock.
+    let due_cutoff = now - Duration::minutes(2);
     let due: Vec<ArenaPrediction> = state
         .services
         .arena
         .predictions()
         .into_iter()
-        .filter(|p| matches!(p.status, PredictionStatus::Open) && p.expiry_time <= now)
+        .filter(|p| matches!(p.status, PredictionStatus::Open) && p.expiry_time <= due_cutoff)
         .collect();
 
     let mut metric_values = std::collections::HashMap::new();
@@ -86,7 +121,9 @@ pub async fn resolve_due_predictions(state: &AppState) -> ArenaResolutionSummary
     let resolved_ids = state
         .services
         .arena
-        .resolve_expired(|metric_key| metric_values.get(metric_key).copied());
+        .resolve_expired(due_cutoff, |metric_key| {
+            metric_values.get(metric_key).copied()
+        });
 
     let pool = state.services.infra.postgres.as_ref();
     let mut onchain_resolved = 0usize;
@@ -108,6 +145,8 @@ pub async fn resolve_due_predictions(state: &AppState) -> ArenaResolutionSummary
                 errors.push(format!("entry {} persistence failed: {err}", entry.id));
             }
         }
+
+        notify_prediction_resolved(state, &prediction, &entries).await;
 
         // Mirror the resolution on-chain so locked points are released.
         let Some(onchain_id) = prediction.onchain_prediction_id else {
@@ -294,7 +333,10 @@ pub async fn generate_prediction_if_needed(
         }
     }
 
-    state.services.arena.seed_predictions(vec![prediction.clone()]);
+    state
+        .services
+        .arena
+        .seed_predictions(vec![prediction.clone()]);
     if let Err(err) =
         persist_arena_prediction(state.services.infra.postgres.as_ref(), &prediction).await
     {

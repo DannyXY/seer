@@ -133,6 +133,8 @@
 }
 .seer-confirm-chip-ic { width: 32px; height: 32px; border-radius: 99px; font-family: var(--font-mono); font-size: 15px; font-weight: 600; flex-shrink: 0; }
 .seer-confirm-actions { display: flex; gap: 10px; margin-top: 16px; }
+.seer-confirm-actions { flex-wrap: wrap; }
+.seer-confirm-actions .btn { min-height: 38px; }
 .seer-confirm-done {
   display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 16px;
   padding: 11px; border-radius: var(--r-sm); background: var(--c-opp-wash); color: var(--ink); font-size: 13.5px; font-weight: 500;
@@ -151,6 +153,19 @@
   padding: 2px 6px; border-radius: var(--r-xs);
   background: rgba(247,168,51,0.18); color: var(--c-risk);
   flex-shrink: 0; white-space: nowrap;
+}
+.seer-simulation-badge.ready,
+.seer-simulation-badge.anchor {
+  background: var(--c-opp-wash); color: var(--c-opp);
+}
+.seer-simulation-badge.danger {
+  background: rgba(255,92,92,0.14); color: var(--danger);
+}
+.seer-simulation-banner:has(.seer-simulation-badge.ready) {
+  background: var(--c-opp-wash); border-color: rgba(43,212,190,0.28); color: var(--c-opp);
+}
+.seer-simulation-banner:has(.seer-simulation-badge.danger) {
+  background: rgba(255,92,92,0.10); border-color: rgba(255,92,92,0.24); color: var(--danger);
 }
 
 /* ---- composer ---- */
@@ -181,6 +196,36 @@
 .seer-rail-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .seer-rail-header .serif { white-space: nowrap; }
 @media (max-width: 1080px) { .seer-intents-rail { display: none; } }
+.seer-approvals-panel {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-md);
+  padding: 14px; margin: 4px 0 10px;
+}
+.seer-approvals-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 10px;
+}
+.seer-approval-row {
+  display: flex; justify-content: space-between; gap: 10px;
+  padding: 10px; border-radius: var(--r-sm);
+  background: var(--card-2); border: 1px solid var(--line);
+}
+.seer-approval-token {
+  width: 20px; height: 20px; border-radius: 99px;
+  background: var(--coral-wash); border: 1px solid var(--coral-line);
+  color: var(--coral); font-family: var(--font-mono); font-size: 11px;
+}
+.seer-approval-revoke {
+  padding: 5px 8px; border-radius: var(--r-xs);
+  border: 1px solid rgba(255,92,92,0.28);
+  background: rgba(255,92,92,0.08); color: #ff8888;
+  font-size: 11px; font-weight: 700;
+}
+.seer-approval-revoke:hover:not(:disabled) { border-color: rgba(255,92,92,0.44); color: #ffaaaa; }
+.seer-approval-revoke:disabled { opacity: 0.55; cursor: not-allowed; }
+.seer-approval-error {
+  margin-top: 10px; font-size: 11.5px; line-height: 1.4;
+  color: var(--c-risk);
+}
 .seer-rail-intent {
   background: var(--card); border: 1px solid var(--line); border-radius: var(--r-md); padding: 14px;
   transition: box-shadow .2s var(--ease), border-color .2s var(--ease);

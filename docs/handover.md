@@ -145,9 +145,9 @@ AA_PAYMASTER_URL=<optional paymaster>
 
 Current backend relay boundary validates session-policy addresses and provider-built user-operation shape. Provider-specific Safe session-key signing/building remains outside the Rust backend and must produce a complete signed user operation before Seer relays it.
 
-`GET /api/contracts/readiness` exposes `live_validation.safe_user_operation` and `live_validation.lendle_supply` to show missing env/config before attempting live Safe or Lendle validation.
+`GET /api/contracts/readiness` exposes `live_validation.safe_user_operation` and `live_validation.protocol_swaps` to show missing env/config before attempting live Safe or protocol execution validation.
 
-Use `scripts/live-validation-smoke.sh` against a running API to print readiness and optionally enforce `REQUIRE_SAFE_READY=1` or `REQUIRE_LENDLE_READY=1`.
+Use `scripts/live-validation-smoke.sh` against a running API to print readiness and optionally enforce `REQUIRE_SAFE_READY=1` or `REQUIRE_PROTOCOL_READY=1`.
 
 ## API And Worker Runtime
 
@@ -221,6 +221,8 @@ MANTLE_METH_ADDRESS=
 SEER_APPROVED_STRATEGY_ADDRESS=
 SEER_APPROVED_STRATEGY_SPENDER_ADDRESS=
 SEER_STRATEGY_DEPOSIT_FUNCTION=deposit(address,uint256)
+
+SEER_EXEC_TOKEN_ADDRESSES=USDC:<Sepolia USDC/probe token>,USDT:<Sepolia USDT/probe token>
 
 SEER_LENDLE_STRATEGY_ADDRESS=
 SEER_LENDLE_SPENDER_ADDRESS=

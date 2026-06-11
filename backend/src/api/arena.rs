@@ -8,7 +8,10 @@ use uuid::Uuid;
 
 use crate::{
     api::auth_guard::require_wallet,
-    db::{load_arena_predictions, load_entries_for_wallet, persist_arena_entry, persist_arena_prediction},
+    db::{
+        load_arena_predictions, load_entries_for_wallet, persist_arena_entry,
+        persist_arena_prediction,
+    },
     errors::ApiError,
     models::arena::ArenaEntryRequest,
     AppState,
@@ -73,8 +76,16 @@ pub async fn enter(
 
     // Sync on-chain points into the in-memory store before the balance check,
     // so a wallet that claimed on-chain is never rejected for insufficient balance.
-    if let Ok(onchain_pts) = state.services.contracts.read_available_points(&entry.wallet_address).await {
-        state.services.arena.sync_points(&entry.wallet_address, onchain_pts);
+    if let Ok(onchain_pts) = state
+        .services
+        .contracts
+        .read_available_points(&entry.wallet_address)
+        .await
+    {
+        state
+            .services
+            .arena
+            .sync_points(&entry.wallet_address, onchain_pts);
     }
 
     let entry = state
@@ -126,9 +137,9 @@ pub async fn entries(
 
     // 1. Restore entries from DB on cache miss.
     if state.services.arena.entries_for_wallet(&address).is_empty() {
-        if let Ok(db_entries) = load_entries_for_wallet(
-            state.services.infra.postgres.as_ref(), &address
-        ).await {
+        if let Ok(db_entries) =
+            load_entries_for_wallet(state.services.infra.postgres.as_ref(), &address).await
+        {
             state.services.arena.seed_entries(db_entries);
         }
     }
@@ -192,7 +203,12 @@ pub async fn entries(
     }
 
     // 3. Sync on-chain points so balance is accurate even after restart.
-    if let Ok(onchain_pts) = state.services.contracts.read_available_points(&address).await {
+    if let Ok(onchain_pts) = state
+        .services
+        .contracts
+        .read_available_points(&address)
+        .await
+    {
         state.services.arena.sync_points(&address, onchain_pts);
     }
 
@@ -231,7 +247,10 @@ pub async fn on_chain_points(
     require_wallet(&state, &headers, &address)?;
     let (available, claimed) = tokio::join!(
         state.services.contracts.read_available_points(&address),
-        state.services.contracts.has_claimed_starter_points(&address),
+        state
+            .services
+            .contracts
+            .has_claimed_starter_points(&address),
     );
     let claim_calldata = state.services.contracts.claim_starter_points_calldata()
         .map(|(to, data)| json!({ "to": to, "data": data, "chain_id": state.services.contracts.chain_id }));

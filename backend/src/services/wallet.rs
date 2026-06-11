@@ -25,10 +25,15 @@ impl WalletService {
             .await
             .unwrap_or_else(|_| Vec::new());
 
+        let mainnet_balances = balances.clone();
+
         Ok(WalletSummary {
             address: profile.address,
             network: profile.network,
             balances,
+            mainnet_balances,
+            testnet_balances: Vec::new(),
+            seer_token_faucet_calldata: None,
             risk_score: profile.risk_score,
             wallet_age_days: profile.wallet_age_days,
             protocols_used: profile.protocols_used.len(),

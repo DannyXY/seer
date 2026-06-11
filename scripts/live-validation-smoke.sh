@@ -3,7 +3,7 @@ set -euo pipefail
 
 BASE_URL="${SEER_API_URL:-http://localhost:10000}"
 REQUIRE_SAFE_READY="${REQUIRE_SAFE_READY:-0}"
-REQUIRE_LENDLE_READY="${REQUIRE_LENDLE_READY:-0}"
+REQUIRE_PROTOCOL_READY="${REQUIRE_PROTOCOL_READY:-${REQUIRE_LENDLE_READY:-0}}"
 RUN_LENDLE_EVAL="${RUN_LENDLE_EVAL:-0}"
 
 require_command() {
@@ -98,7 +98,7 @@ else
 fi
 
 require_ready "$readiness" ".live_validation.safe_user_operation" "Safe user operation" "$REQUIRE_SAFE_READY"
-require_ready "$readiness" ".live_validation.lendle_supply" "Lendle supply" "$REQUIRE_LENDLE_READY"
+require_ready "$readiness" ".live_validation.protocol_swaps" "Protocol execution" "$REQUIRE_PROTOCOL_READY"
 
 echo "== Execution Destination Readiness =="
 fetch_json "/api/contracts/execution-readiness" "$execution_readiness"

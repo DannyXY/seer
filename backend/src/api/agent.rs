@@ -239,7 +239,9 @@ pub async fn create_intent(
 fn parse_raw_intent_from_metadata_uri(uri: &str) -> Option<String> {
     let json_str = uri.strip_prefix("data:application/json,")?;
     let v: serde_json::Value = serde_json::from_str(json_str).ok()?;
-    v.get("intent").and_then(|s| s.as_str()).map(|s| s.to_string())
+    v.get("intent")
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_string())
 }
 
 fn parse_rpc_u256(value: &str) -> anyhow::Result<U256> {
@@ -331,9 +333,10 @@ pub async fn intents(
 
     // 1. Restore from DB on cache miss (e.g. after server restart)
     if state.services.agent.list_intents(&address).is_empty() {
-        if let Ok(db_intents) = crate::db::load_intents_for_wallet(
-            state.services.infra.postgres.as_ref(), &address
-        ).await {
+        if let Ok(db_intents) =
+            crate::db::load_intents_for_wallet(state.services.infra.postgres.as_ref(), &address)
+                .await
+        {
             state.services.agent.seed_intents(db_intents);
         }
     }
@@ -382,10 +385,18 @@ pub async fn intent(
     require_wallet(&state, &headers, &intent.wallet_address)?;
 
     // Restore policies from DB on cache miss.
-    if state.services.agent.policies_for_intent(intent_id).is_empty() {
+    if state
+        .services
+        .agent
+        .policies_for_intent(intent_id)
+        .is_empty()
+    {
         if let Ok(db_policies) = load_policies_for_wallet(
-            state.services.infra.postgres.as_ref(), &intent.wallet_address
-        ).await {
+            state.services.infra.postgres.as_ref(),
+            &intent.wallet_address,
+        )
+        .await
+        {
             state.services.agent.seed_policies(db_policies);
         }
     }
@@ -409,10 +420,15 @@ pub async fn reasoning(
     require_wallet(&state, &headers, &intent.wallet_address)?;
 
     // Restore execution logs from DB on cache miss.
-    if state.services.agent.execution_logs_for_intent(intent_id).is_empty() {
-        if let Ok(db_logs) = load_logs_for_intent(
-            state.services.infra.postgres.as_ref(), intent_id
-        ).await {
+    if state
+        .services
+        .agent
+        .execution_logs_for_intent(intent_id)
+        .is_empty()
+    {
+        if let Ok(db_logs) =
+            load_logs_for_intent(state.services.infra.postgres.as_ref(), intent_id).await
+        {
             state.services.agent.seed_execution_logs(intent_id, db_logs);
         }
     }
@@ -601,12 +617,17 @@ fn validate_hex_address(value: &str, name: &str) -> Result<(), ApiError> {
 
 /// Resolve an intent from in-memory store, falling back to the database.
 /// Seeds the intent into memory on a DB hit so subsequent calls are fast.
-async fn resolve_intent(state: &crate::AppState, intent_id: Uuid) -> Option<crate::models::agent::AgentIntent> {
+async fn resolve_intent(
+    state: &crate::AppState,
+    intent_id: Uuid,
+) -> Option<crate::models::agent::AgentIntent> {
     if let Some(intent) = state.services.agent.get_intent(intent_id) {
         return Some(intent);
     }
     // Not in memory — try DB (happens after server restart).
-    if let Ok(Some(intent)) = load_intent_by_id(state.services.infra.postgres.as_ref(), intent_id).await {
+    if let Ok(Some(intent)) =
+        load_intent_by_id(state.services.infra.postgres.as_ref(), intent_id).await
+    {
         state.services.agent.seed_intents(vec![intent.clone()]);
         return Some(intent);
     }
@@ -618,7 +639,8 @@ pub async fn pause(
     headers: HeaderMap,
     Path(intent_id): Path<Uuid>,
 ) -> Result<Json<Value>, ApiError> {
-    let existing = resolve_intent(&state, intent_id).await
+    let existing = resolve_intent(&state, intent_id)
+        .await
         .ok_or(ApiError::NotFound)?;
     require_wallet(&state, &headers, &existing.wallet_address)?;
     let intent = state
@@ -644,7 +666,8 @@ pub async fn resume(
     headers: HeaderMap,
     Path(intent_id): Path<Uuid>,
 ) -> Result<Json<Value>, ApiError> {
-    let existing = resolve_intent(&state, intent_id).await
+    let existing = resolve_intent(&state, intent_id)
+        .await
         .ok_or(ApiError::NotFound)?;
     require_wallet(&state, &headers, &existing.wallet_address)?;
     let intent = state
@@ -669,7 +692,8 @@ pub async fn stop(
     headers: HeaderMap,
     Path(intent_id): Path<Uuid>,
 ) -> Result<Json<Value>, ApiError> {
-    let existing = resolve_intent(&state, intent_id).await
+    let existing = resolve_intent(&state, intent_id)
+        .await
         .ok_or(ApiError::NotFound)?;
     require_wallet(&state, &headers, &existing.wallet_address)?;
     let intent = state

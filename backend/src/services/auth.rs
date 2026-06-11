@@ -5,7 +5,7 @@ use std::sync::RwLock;
 use chrono::{Duration, Utc};
 use ethers_core::types::{Address, Signature};
 use hmac::{Hmac, Mac};
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 use uuid::Uuid;
 
 use crate::models::auth::{AuthChallenge, AuthSession, AuthVerifyRequest};
@@ -96,7 +96,11 @@ impl AuthService {
         let normalized_wallet = normalize_wallet(wallet_address).expect("valid test wallet");
         let expires_at = Utc::now() + Duration::hours(1);
         let token = mint_token(&normalized_wallet, expires_at.timestamp());
-        AuthSession { wallet_address: normalized_wallet, token, expires_at }
+        AuthSession {
+            wallet_address: normalized_wallet,
+            token,
+            expires_at,
+        }
     }
 }
 
@@ -111,7 +115,9 @@ fn mint_token(wallet: &str, expires_unix: i64) -> String {
 
 fn verify_token(token: &str) -> Option<AuthSession> {
     let parts: Vec<&str> = token.splitn(3, '.').collect();
-    if parts.len() != 3 { return None; }
+    if parts.len() != 3 {
+        return None;
+    }
     let wallet = parts[0];
     let expires_unix: i64 = parts[1].parse().ok()?;
     let provided_sig = parts[2];
@@ -125,7 +131,9 @@ fn verify_token(token: &str) -> Option<AuthSession> {
     }
 
     let expires_at = chrono::DateTime::from_timestamp(expires_unix, 0)?;
-    if expires_at < Utc::now() { return None; }
+    if expires_at < Utc::now() {
+        return None;
+    }
 
     Some(AuthSession {
         wallet_address: wallet.to_string(),
@@ -135,15 +143,19 @@ fn verify_token(token: &str) -> Option<AuthSession> {
 }
 
 fn hmac_sign(payload: &str) -> String {
-    let mut mac = HmacSha256::new_from_slice(&token_secret())
-        .expect("HMAC accepts any key length");
+    let mut mac = HmacSha256::new_from_slice(&token_secret()).expect("HMAC accepts any key length");
     mac.update(payload.as_bytes());
     format!("{:x}", mac.finalize().into_bytes())
 }
 
 fn constant_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() { return false; }
-    a.iter().zip(b.iter()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter()
+        .zip(b.iter())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
 }
 
 // ── Shared helpers ────────────────────────────────────────────────────────────

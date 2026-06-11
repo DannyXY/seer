@@ -29,7 +29,7 @@ function ShareModal({ archKey, data, onClose }) {
   const [url, setUrl] = useState(null);
   const handleReady = useCallback((cv) => { setUrl(cv.toDataURL("image/png")); }, []);
   const arch = window.SEER.ARCHETYPES[archKey] || window.SEER.ARCHETYPES.strategist;
-  const post = `My Mantle DeFi identity, read by @SeerProtocol: "${arch.name}" - ${data.percentileLabel}. See before they do. #MantleAIHackathon`;
+  const post = `My Mantle DeFi identity, read by @theseeragent: "${arch.name}" - ${data.percentileLabel}. See before they do. #MantleAIHackathon`;
   return (
     <div className="seer-modal-bg" onClick={onClose}>
       <div className="card seer-share-modal" onClick={(e) => e.stopPropagation()}>
@@ -78,23 +78,14 @@ function ProtocolBar({ p }) {
   );
 }
 
-/** Derive a consistent archetype from a wallet address so every wallet
- *  gets its own identity, reproducibly. Falls back to backend value if set. */
-function walletDerivedArchetype(walletAddress, backendArchetype) {
+/** Map the backend's behaviour-derived archetype to a card key. The backend
+ *  classifies from real on-chain signals (portfolio value, activity, token
+ *  diversity, concentration risk), so we trust it rather than re-deriving. */
+function archetypeKey(backendArchetype) {
   const keys = Object.keys(window.SEER.ARCHETYPES);
-  // If backend gave a real (non-default) value, trust it
-  if (backendArchetype && backendArchetype !== "strategist") {
-    const norm = backendArchetype.toLowerCase().replace(/[^a-z]/g, "");
-    const match = keys.find(k => norm.includes(k) || k.includes(norm));
-    if (match) return match;
-  }
-  // Derive from wallet address — stable per wallet, varies across wallets
-  if (!walletAddress) return keys[0];
-  let h = 0;
-  for (let i = 2; i < walletAddress.length; i++) {
-    h = Math.imul(h ^ walletAddress.charCodeAt(i), 0x9e3779b1) >>> 0;
-  }
-  return keys[h % keys.length];
+  if (!backendArchetype) return keys[0];
+  const norm = String(backendArchetype).toLowerCase().replace(/[^a-z]/g, "");
+  return keys.find(k => norm.includes(k) || k.includes(norm)) || keys[0];
 }
 
 export function IdentityScreen({ showToast }) {
@@ -102,7 +93,7 @@ export function IdentityScreen({ showToast }) {
   const base = seer.IDENTITY;
   const [minting, setMinting] = useState(false);
   const [share, setShare] = useState(false);
-  const archKey = walletDerivedArchetype(base.wallet, base.archetype);
+  const archKey = archetypeKey(base.archetype);
   const A = window.SEER.ARCHETYPES[archKey] || window.SEER.ARCHETYPES.strategist;
   const data = { ...base, archetype: archKey };
 

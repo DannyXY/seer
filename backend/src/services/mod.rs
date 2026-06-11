@@ -7,6 +7,7 @@ pub mod contracts;
 pub mod data_provider;
 pub mod execution;
 pub mod identity;
+pub mod notifier;
 pub mod quoter;
 pub mod settings;
 pub mod signal_engine;
@@ -28,6 +29,7 @@ pub struct AppServices {
     pub settings: settings::SettingsService,
     pub execution: execution::ExecutionService,
     pub contracts: contracts::ContractService,
+    pub notifier: notifier::NotifierService,
 }
 
 impl AppServices {
@@ -38,6 +40,10 @@ impl AppServices {
         let claude = claude::ClaudeService::new(settings.clone());
         let arena = arena::ArenaService::new();
         let contracts = contracts::ContractService::new(settings.clone());
+        let notifier = notifier::NotifierService::new(
+            settings.telegram_bot_token.clone(),
+            settings.telegram_chat_id.clone(),
+        );
 
         Ok(Self {
             infra,
@@ -50,6 +56,7 @@ impl AppServices {
             settings: settings::SettingsService::new(),
             execution: execution::ExecutionService::new(settings.clone()),
             contracts,
+            notifier,
             provider,
             claude,
         })

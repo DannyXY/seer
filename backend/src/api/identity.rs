@@ -12,16 +12,33 @@ pub async fn get(
     Path(address): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     let provider = state.services.provider.provider().await;
+    let onchain_tx_count = state
+        .services
+        .contracts
+        .get_transaction_count(&address)
+        .await
+        .ok();
+    let onchain_portfolio = state.services.contracts.get_portfolio(&address).await;
     let mut identity = state
         .services
         .identity
-        .generate(provider, &address)
+        .generate(
+            provider,
+            &address,
+            onchain_tx_count,
+            Some(&onchain_portfolio),
+        )
         .await
         .map_err(|err| ApiError::Service(err.to_string()))?;
 
     // Hydrate on-chain mint status so the frontend shows the correct minted state.
     if state.services.contracts.rpc_configured() {
-        if let Ok(token_id) = state.services.contracts.identity_token_of_owner(&address).await {
+        if let Ok(token_id) = state
+            .services
+            .contracts
+            .identity_token_of_owner(&address)
+            .await
+        {
             if token_id > 0 {
                 identity.sbt_token_id = Some(token_id);
             }
@@ -38,15 +55,32 @@ pub async fn generate(
 ) -> Result<Json<Value>, ApiError> {
     require_wallet(&state, &headers, &address)?;
     let provider = state.services.provider.provider().await;
+    let onchain_tx_count = state
+        .services
+        .contracts
+        .get_transaction_count(&address)
+        .await
+        .ok();
+    let onchain_portfolio = state.services.contracts.get_portfolio(&address).await;
     let mut identity = state
         .services
         .identity
-        .generate(provider, &address)
+        .generate(
+            provider,
+            &address,
+            onchain_tx_count,
+            Some(&onchain_portfolio),
+        )
         .await
         .map_err(|err| ApiError::Service(err.to_string()))?;
 
     if state.services.contracts.rpc_configured() {
-        if let Ok(token_id) = state.services.contracts.identity_token_of_owner(&address).await {
+        if let Ok(token_id) = state
+            .services
+            .contracts
+            .identity_token_of_owner(&address)
+            .await
+        {
             if token_id > 0 {
                 identity.sbt_token_id = Some(token_id);
             }
@@ -63,10 +97,22 @@ pub async fn mint_metadata(
 ) -> Result<Json<Value>, ApiError> {
     require_wallet(&state, &headers, &address)?;
     let provider = state.services.provider.provider().await;
+    let onchain_tx_count = state
+        .services
+        .contracts
+        .get_transaction_count(&address)
+        .await
+        .ok();
+    let onchain_portfolio = state.services.contracts.get_portfolio(&address).await;
     let identity = state
         .services
         .identity
-        .generate(provider, &address)
+        .generate(
+            provider,
+            &address,
+            onchain_tx_count,
+            Some(&onchain_portfolio),
+        )
         .await
         .map_err(|err| ApiError::Service(err.to_string()))?;
 
@@ -92,7 +138,12 @@ pub async fn mint_metadata(
     }
 
     // Check if already minted
-    if let Ok(token_id) = state.services.contracts.identity_token_of_owner(&address).await {
+    if let Ok(token_id) = state
+        .services
+        .contracts
+        .identity_token_of_owner(&address)
+        .await
+    {
         if token_id > 0 {
             return Ok(Json(json!({
                 "wallet_address": address,

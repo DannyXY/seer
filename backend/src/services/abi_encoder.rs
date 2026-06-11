@@ -1,3 +1,7 @@
+// Staged protocol calldata encoders (Agni, Merchant Moe, mETH). Not yet
+// wired into the execution path; kept until swap execution lands.
+#![allow(dead_code)]
+
 use ethers_core::{
     abi::{encode, Token},
     types::Address,
@@ -27,7 +31,9 @@ impl AbiEncoder {
         let amount_out_min_u256 = parse_u256(amount_out_minimum)?;
 
         // Function signature: exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))
-        let selector = &id("exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))")[..4];
+        let selector = &id(
+            "exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))",
+        )[..4];
 
         // Encode the tuple parameters
         let params = vec![
@@ -120,7 +126,9 @@ impl AbiEncoder {
             .map(|v| Token::Uint(ethers_core::types::U256::from(*v)))
             .collect();
 
-        let selector = &id("swapExactTokensForTokens(uint256,uint256,uint256[],uint8[],address[],address,uint256)")[..4];
+        let selector = &id(
+            "swapExactTokensForTokens(uint256,uint256,uint256[],uint8[],address[],address,uint256)",
+        )[..4];
 
         let params = vec![
             Token::Uint(parse_u256(amount_in)?),

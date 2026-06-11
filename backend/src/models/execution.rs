@@ -105,6 +105,10 @@ pub struct ProtocolExecutionReadiness {
     pub approval_spender_address: Option<String>,
     pub deposit_function: Option<String>,
     pub adapter_kind: String,
+    /// Whether the configured deposit function is one the transaction builder
+    /// can actually encode. A protocol configured with an unsupported
+    /// signature (e.g. a swap) is "configured", not runnable.
+    pub signature_supported: bool,
     pub ready_for_strategy_draft: bool,
 }
 

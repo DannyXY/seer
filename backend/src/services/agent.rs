@@ -186,7 +186,11 @@ impl AgentService {
         let mut store = self.intents.write().expect("agent intent store poisoned");
         let clean = intent_hash_hex.trim_start_matches("0x");
         for intent in store.values_mut() {
-            if intent.intent_hash.trim_start_matches("0x").eq_ignore_ascii_case(clean) {
+            if intent
+                .intent_hash
+                .trim_start_matches("0x")
+                .eq_ignore_ascii_case(clean)
+            {
                 intent.onchain_intent_id = Some(onchain_id);
             }
         }
@@ -287,7 +291,10 @@ impl AgentService {
 
     /// Bulk-load execution logs from DB into memory for a specific intent.
     pub fn seed_execution_logs(&self, intent_id: Uuid, logs: Vec<AgentExecutionLog>) {
-        let mut store = self.execution_logs.write().expect("agent execution log store poisoned");
+        let mut store = self
+            .execution_logs
+            .write()
+            .expect("agent execution log store poisoned");
         let existing = store.entry(intent_id).or_default();
         let existing_ids: std::collections::HashSet<Uuid> = existing.iter().map(|l| l.id).collect();
         for log in logs {
@@ -475,7 +482,10 @@ fn infer_action(normalized: &str) -> String {
         "stake".to_string()
     } else if normalized.contains("unstake") || normalized.contains("redeem") {
         "unstake".to_string()
-    } else if normalized.contains("buy") || normalized.contains("accumulate") {
+    } else if normalized.contains("buy")
+        || normalized.contains("accumulate")
+        || normalized.contains("deposit")
+    {
         "accumulate".to_string()
     } else if normalized.contains("sell") || normalized.contains("exit") {
         "reduce_exposure".to_string()
@@ -487,11 +497,13 @@ fn infer_action(normalized: &str) -> String {
 }
 
 fn infer_assets(normalized: &str) -> Vec<String> {
-    ["mETH", "MNT", "USDT", "USDC", "USDY", "WMNT", "WETH", "cmETH"]
-        .iter()
-        .filter(|asset| normalized.contains(&asset.to_lowercase()))
-        .map(|asset| asset.to_string())
-        .collect()
+    [
+        "mETH", "MNT", "USDT", "USDC", "USDY", "WMNT", "WETH", "cmETH",
+    ]
+    .iter()
+    .filter(|asset| normalized.contains(&asset.to_lowercase()))
+    .map(|asset| asset.to_string())
+    .collect()
 }
 
 fn infer_spend_amount(normalized: &str) -> Option<SpendAmount> {
@@ -500,13 +512,15 @@ fn infer_spend_amount(normalized: &str) -> Option<SpendAmount> {
         let Some(amount) = parse_number_token(window[0]) else {
             continue;
         };
-        let Some(asset) = ["meth", "mnt", "usdt", "usdc", "usdy", "wmnt", "weth", "cmeth"]
-            .iter()
-            .find(|asset| window[1].eq_ignore_ascii_case(asset))
-        else {
+        let Some(asset) = [
+            "meth", "mnt", "usdt", "usdc", "usdy", "wmnt", "weth", "cmeth",
+        ]
+        .iter()
+        .find(|asset| window[1].eq_ignore_ascii_case(asset)) else {
             continue;
         };
-        let normalized_asset = asset.to_uppercase()
+        let normalized_asset = asset
+            .to_uppercase()
             .replace("METH", "mETH")
             .replace("CMETH", "cmETH")
             .replace("WMNT", "WMNT")
@@ -530,8 +544,8 @@ fn infer_protocols(normalized: &str) -> Vec<String> {
     {
         protocols.push("Merchant Moe".to_string());
     }
-    if normalized.contains("fluxion") {
-        protocols.push("Fluxion Network".to_string());
+    if normalized.contains("lendle") {
+        protocols.push("Lendle".to_string());
     }
     if normalized.contains("ondo") || normalized.contains("usdy") {
         protocols.push("Ondo USDY".to_string());
@@ -552,8 +566,8 @@ fn infer_subject(normalized: &str) -> String {
         "Merchant Moe".to_string()
     } else if normalized.contains("agni") {
         "Agni Finance".to_string()
-    } else if normalized.contains("fluxion") {
-        "Fluxion Network".to_string()
+    } else if normalized.contains("lendle") {
+        "Lendle".to_string()
     } else if normalized.contains("ondo") || normalized.contains("usdy") {
         "Ondo USDY".to_string()
     } else if normalized.contains("mnt") {

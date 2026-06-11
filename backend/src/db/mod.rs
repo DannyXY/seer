@@ -8,7 +8,7 @@ use crate::config::Settings;
 use crate::models::{
     agent::{AgentExecutionLog, AgentIntent, ExecutionPolicy, IntentExecutionMode, IntentStatus},
     arena::{
-        ArenaEntry, ArenaEntryStatus, ArenaPrediction, ArenaPosition, ComparisonOperator,
+        ArenaEntry, ArenaEntryStatus, ArenaPosition, ArenaPrediction, ComparisonOperator,
         PredictionStatus,
     },
     settings::UserSettings,
@@ -481,20 +481,27 @@ pub async fn persist_lp_position(
         crate::models::lp_position::ProtocolType::MerchantMoe => "MerchantMoe",
     };
 
-    let (agni_token_id, agni_token0, agni_token1, agni_fee, agni_tick_lower, agni_tick_upper, agni_liquidity) =
-        if let Some(agni_pos) = &position.agni_position {
-            (
-                Some(agni_pos.token_id as i64),
-                Some(agni_pos.token0.clone()),
-                Some(agni_pos.token1.clone()),
-                Some(agni_pos.fee as i32),
-                Some(agni_pos.tick_lower as i32),
-                Some(agni_pos.tick_upper as i32),
-                Some(agni_pos.liquidity.clone()),
-            )
-        } else {
-            (None, None, None, None, None, None, None)
-        };
+    let (
+        agni_token_id,
+        agni_token0,
+        agni_token1,
+        agni_fee,
+        agni_tick_lower,
+        agni_tick_upper,
+        agni_liquidity,
+    ) = if let Some(agni_pos) = &position.agni_position {
+        (
+            Some(agni_pos.token_id as i64),
+            Some(agni_pos.token0.clone()),
+            Some(agni_pos.token1.clone()),
+            Some(agni_pos.fee as i32),
+            Some(agni_pos.tick_lower as i32),
+            Some(agni_pos.tick_upper as i32),
+            Some(agni_pos.liquidity.clone()),
+        )
+    } else {
+        (None, None, None, None, None, None, None)
+    };
 
     let (moe_lb_pair, moe_token_x, moe_token_y, moe_bin_step, moe_bin_ids, moe_liquidity_minted) =
         if let Some(moe_pos) = &position.moe_position {
@@ -575,8 +582,9 @@ pub async fn get_lp_positions(
     .fetch_all(pool)
     .await?;
 
-    Ok(rows.iter().map(|(id, protocol)| {
-        crate::models::lp_position::LpPosition {
+    Ok(rows
+        .iter()
+        .map(|(id, protocol)| crate::models::lp_position::LpPosition {
             id: uuid::Uuid::parse_str(id).unwrap_or_else(|_| uuid::Uuid::new_v4()),
             wallet_address: wallet_address.to_string(),
             protocol: if protocol == "AgniFinance" {
@@ -592,8 +600,8 @@ pub async fn get_lp_positions(
             tx_hash: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-        }
-    }).collect())
+        })
+        .collect())
 }
 
 // ── Arena predictions ────────────────────────────────────────────────────────
@@ -602,7 +610,9 @@ pub async fn persist_arena_prediction(
     pool: Option<&PgPool>,
     prediction: &ArenaPrediction,
 ) -> anyhow::Result<()> {
-    let Some(pool) = pool else { return Ok(()); };
+    let Some(pool) = pool else {
+        return Ok(());
+    };
 
     let op_str = match prediction.comparison_operator {
         ComparisonOperator::GreaterThanOrEqual => "GTE",
@@ -618,8 +628,15 @@ pub async fn persist_arena_prediction(
         PredictionStatus::Resolved => "RESOLVED",
         PredictionStatus::Cancelled => "CANCELLED",
     };
+    // The result column has a CHECK constraint on SCREAMING_SNAKE values.
+    let result_str = prediction.result.as_deref().map(|result| match result {
+        "SeerCorrect" => "SEER_CORRECT",
+        "SeerIncorrect" => "SEER_INCORRECT",
+        _ => "VOID",
+    });
 
-    sqlx::query(r#"
+    sqlx::query(
+        r#"
         INSERT INTO arena_predictions (
             id, onchain_prediction_id, claim, metric, target_value,
             comparison_operator, expiry_time, seer_position, seer_confidence,
@@ -632,7 +649,8 @@ pub async fn persist_arena_prediction(
             result                = EXCLUDED.result,
             final_value           = EXCLUDED.final_value,
             expiry_time           = EXCLUDED.expiry_time
-    "#)
+    "#,
+    )
     .bind(prediction.id)
     .bind(prediction.onchain_prediction_id.map(|v| v as i64))
     .bind(&prediction.claim)
@@ -644,7 +662,7 @@ pub async fn persist_arena_prediction(
     .bind(prediction.seer_confidence as i32)
     .bind(&prediction.reasoning)
     .bind(status_str)
-    .bind(&prediction.result)
+    .bind(result_str)
     .bind(prediction.final_value)
     .bind(prediction.created_at)
     .execute(pool)
@@ -653,19 +671,23 @@ pub async fn persist_arena_prediction(
     Ok(())
 }
 
-pub async fn load_arena_predictions(
-    pool: Option<&PgPool>,
-) -> anyhow::Result<Vec<ArenaPrediction>> {
+pub async fn load_arena_predictions(pool: Option<&PgPool>) -> anyhow::Result<Vec<ArenaPrediction>> {
     use sqlx::Row;
-    let Some(pool) = pool else { return Ok(Vec::new()); };
+    let Some(pool) = pool else {
+        return Ok(Vec::new());
+    };
 
-    let rows = sqlx::query(r#"
-        SELECT id, onchain_prediction_id, claim, metric, target_value,
+    let rows = sqlx::query(
+        r#"
+        SELECT id, onchain_prediction_id, claim, metric,
+               target_value::FLOAT8 AS target_value,
                comparison_operator, expiry_time, seer_position, seer_confidence,
-               reasoning, status, result, final_value, created_at
+               reasoning, status, result,
+               final_value::FLOAT8 AS final_value, created_at
         FROM arena_predictions
         ORDER BY created_at DESC
-    "#)
+    "#,
+    )
     .fetch_all(pool)
     .await?;
 
@@ -700,6 +722,12 @@ pub async fn load_arena_predictions(
             "CANCELLED" => PredictionStatus::Cancelled,
             _ => PredictionStatus::Open,
         };
+        // Reverse of the persist-side mapping to in-memory result labels.
+        let result = result.map(|value| match value.as_str() {
+            "SEER_CORRECT" => "SeerCorrect".to_string(),
+            "SEER_INCORRECT" => "SeerIncorrect".to_string(),
+            other => other.to_string(),
+        });
 
         out.push(ArenaPrediction {
             id,
@@ -723,11 +751,10 @@ pub async fn load_arena_predictions(
 
 // ── Arena entries ─────────────────────────────────────────────────────────────
 
-pub async fn persist_arena_entry(
-    pool: Option<&PgPool>,
-    entry: &ArenaEntry,
-) -> anyhow::Result<()> {
-    let Some(pool) = pool else { return Ok(()); };
+pub async fn persist_arena_entry(pool: Option<&PgPool>, entry: &ArenaEntry) -> anyhow::Result<()> {
+    let Some(pool) = pool else {
+        return Ok(());
+    };
 
     let pos_str = match entry.user_position {
         ArenaPosition::BackSeer => "BACK_SEER",
@@ -739,7 +766,8 @@ pub async fn persist_arena_entry(
         ArenaEntryStatus::Cancelled => "CANCELLED",
     };
 
-    sqlx::query(r#"
+    sqlx::query(
+        r#"
         INSERT INTO arena_entries (
             id, prediction_id, wallet_address, user_position,
             points_committed, status, points_delta, tx_hash,
@@ -750,7 +778,8 @@ pub async fn persist_arena_entry(
             status       = EXCLUDED.status,
             points_delta = EXCLUDED.points_delta,
             resolved_at  = EXCLUDED.resolved_at
-    "#)
+    "#,
+    )
     .bind(entry.id)
     .bind(entry.prediction_id)
     .bind(&entry.wallet_address)
@@ -771,15 +800,19 @@ pub async fn persist_arena_entry(
 /// before a restart still settle and persist correctly.
 pub async fn load_all_arena_entries(pool: Option<&PgPool>) -> anyhow::Result<Vec<ArenaEntry>> {
     use sqlx::Row;
-    let Some(pool) = pool else { return Ok(Vec::new()); };
+    let Some(pool) = pool else {
+        return Ok(Vec::new());
+    };
 
-    let rows = sqlx::query(r#"
+    let rows = sqlx::query(
+        r#"
         SELECT id, prediction_id, wallet_address, user_position,
                points_committed, status, points_delta, tx_hash,
                created_at, resolved_at
         FROM arena_entries
         ORDER BY created_at DESC
-    "#)
+    "#,
+    )
     .fetch_all(pool)
     .await?;
 
@@ -816,16 +849,20 @@ pub async fn load_entries_for_wallet(
     wallet_address: &str,
 ) -> anyhow::Result<Vec<ArenaEntry>> {
     use sqlx::Row;
-    let Some(pool) = pool else { return Ok(Vec::new()); };
+    let Some(pool) = pool else {
+        return Ok(Vec::new());
+    };
 
-    let rows = sqlx::query(r#"
+    let rows = sqlx::query(
+        r#"
         SELECT id, prediction_id, wallet_address, user_position,
                points_committed, status, points_delta, tx_hash,
                created_at, resolved_at
         FROM arena_entries
         WHERE LOWER(wallet_address) = LOWER($1)
         ORDER BY created_at DESC
-    "#)
+    "#,
+    )
     .bind(wallet_address)
     .fetch_all(pool)
     .await?;
@@ -876,16 +913,20 @@ pub async fn load_policies_for_wallet(
     wallet_address: &str,
 ) -> anyhow::Result<Vec<ExecutionPolicy>> {
     use sqlx::Row;
-    let Some(pool) = pool else { return Ok(Vec::new()); };
+    let Some(pool) = pool else {
+        return Ok(Vec::new());
+    };
 
-    let rows = sqlx::query(r#"
+    let rows = sqlx::query(
+        r#"
         SELECT id, intent_id, wallet_address, allowed_assets, allowed_protocols,
                max_spend_usd, max_transaction_count, expires_at, status,
                policy_hash, created_at
         FROM agent_execution_policies
         WHERE LOWER(wallet_address) = LOWER($1)
         ORDER BY created_at DESC
-    "#)
+    "#,
+    )
     .bind(wallet_address)
     .fetch_all(pool)
     .await?;
@@ -903,12 +944,10 @@ pub async fn load_policies_for_wallet(
         let status_str: String = row.try_get("status")?;
         let policy_hash: String = row.try_get("policy_hash")?;
 
-        let allowed_assets: Vec<String> =
-            serde_json::from_value(assets_json).unwrap_or_default();
+        let allowed_assets: Vec<String> = serde_json::from_value(assets_json).unwrap_or_default();
         let allowed_protocols: Vec<String> =
             serde_json::from_value(protocols_json).unwrap_or_default();
-        let max_spend_usd = max_spend
-            .and_then(|v| v.to_string().parse::<f64>().ok());
+        let max_spend_usd = max_spend.and_then(|v| v.to_string().parse::<f64>().ok());
         let status = match status_str.as_str() {
             "ACTIVE" => IntentStatus::Active,
             "PAUSED" => IntentStatus::Paused,
@@ -945,9 +984,12 @@ pub async fn load_logs_for_intent(
     intent_id: uuid::Uuid,
 ) -> anyhow::Result<Vec<AgentExecutionLog>> {
     use sqlx::Row;
-    let Some(pool) = pool else { return Ok(Vec::new()); };
+    let Some(pool) = pool else {
+        return Ok(Vec::new());
+    };
 
-    let rows = sqlx::query(r#"
+    let rows = sqlx::query(
+        r#"
         SELECT l.id, l.intent_id, l.policy_id, l.action_type, l.proposed_action,
                l.execution_status, l.reasoning_hash, l.created_at,
                i.wallet_address
@@ -955,7 +997,8 @@ pub async fn load_logs_for_intent(
         JOIN agent_intents i ON i.id = l.intent_id
         WHERE l.intent_id = $1
         ORDER BY l.created_at ASC
-    "#)
+    "#,
+    )
     .bind(intent_id)
     .fetch_all(pool)
     .await?;
@@ -998,15 +1041,19 @@ pub async fn persist_user_settings(
     wallet_address: &str,
     settings: &UserSettings,
 ) -> anyhow::Result<()> {
-    let Some(pool) = pool else { return Ok(()); };
+    let Some(pool) = pool else {
+        return Ok(());
+    };
 
-    sqlx::query(r#"
+    sqlx::query(
+        r#"
         INSERT INTO user_settings (wallet_address, settings, updated_at)
         VALUES ($1, $2, NOW())
         ON CONFLICT (wallet_address) DO UPDATE SET
             settings   = EXCLUDED.settings,
             updated_at = NOW()
-    "#)
+    "#,
+    )
     .bind(wallet_address.to_lowercase())
     .bind(serde_json::to_value(settings)?)
     .execute(pool)
@@ -1020,16 +1067,18 @@ pub async fn load_user_settings(
     wallet_address: &str,
 ) -> anyhow::Result<Option<UserSettings>> {
     use sqlx::Row;
-    let Some(pool) = pool else { return Ok(None); };
+    let Some(pool) = pool else {
+        return Ok(None);
+    };
 
-    let row = sqlx::query(
-        "SELECT settings FROM user_settings WHERE wallet_address = LOWER($1)",
-    )
-    .bind(wallet_address)
-    .fetch_optional(pool)
-    .await?;
+    let row = sqlx::query("SELECT settings FROM user_settings WHERE wallet_address = LOWER($1)")
+        .bind(wallet_address)
+        .fetch_optional(pool)
+        .await?;
 
-    let Some(row) = row else { return Ok(None); };
+    let Some(row) = row else {
+        return Ok(None);
+    };
     let json: serde_json::Value = row.try_get("settings")?;
     Ok(serde_json::from_value(json).ok())
 }
@@ -1169,6 +1218,7 @@ mod tests {
             defillama_base_url: "https://api.llama.fi".to_string(),
             defillama_yields_base_url: "https://yields.llama.fi".to_string(),
             mantle_rpc_url: None,
+            mantle_data_rpc_url: None,
             mantle_chain_id: 5003,
             aa_provider_stack: "safe-4337-relay-kit".to_string(),
             aa_bundler_url: None,
@@ -1183,6 +1233,7 @@ mod tests {
             mantle_wmnt_address: None,
             mantle_weth_address: None,
             mantle_cmeth_address: None,
+            exec_token_addresses: Vec::new(),
             approved_strategy_address: None,
             approved_strategy_spender_address: None,
             strategy_deposit_function: "deposit(address,uint256)".to_string(),
@@ -1192,9 +1243,9 @@ mod tests {
             agni_strategy_address: None,
             agni_spender_address: None,
             agni_deposit_function: None,
-            fluxion_strategy_address: None,
-            fluxion_spender_address: None,
-            fluxion_deposit_function: None,
+            lendle_strategy_address: None,
+            lendle_spender_address: None,
+            lendle_deposit_function: None,
             meth_strategy_address: None,
             meth_spender_address: None,
             meth_deposit_function: None,
@@ -1205,6 +1256,8 @@ mod tests {
             prediction_registry_address: None,
             identity_sbt_address: None,
             intent_registry_address: None,
+            telegram_bot_token: None,
+            telegram_chat_id: None,
         };
         let infra = Infrastructure::from_settings(&settings).unwrap();
 

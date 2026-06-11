@@ -144,10 +144,12 @@ Set `RUN_INTERNAL_JOBS=false` on the API service when a standalone worker is run
 
 The worker runs interval loops for:
 
-- signal generation and condition-trigger checks every 30 seconds
-- Arena metric refresh, due resolution, and leaderboard recalculation every 5 minutes
-- Arena prediction generation every 15 minutes
-- wallet cohort benchmark refresh every hour
+- signal generation and condition-trigger checks every hour
+- Arena due-prediction resolution (DB persistence plus on-chain resolvePrediction/settleEntry) every hour
+- Arena prediction generation (from live protocol metrics, registered on-chain) every 2 hours
+- wallet cohort benchmark refresh every 4 hours (job currently a stub)
+
+Each tick also fires once at startup, so a fresh deploy resolves due predictions and generates a new one without waiting a full interval.
 
 ## Persistence
 
@@ -262,7 +264,7 @@ Concrete drafts returned by `evaluate-intent-with-allowance` are simulated with 
 
 `POST /api/contracts/simulate-transaction` exposes the same dry-run boundary for explicit client checks.
 
-`GET /api/contracts/readiness` also exposes `live_validation.lendle_supply`, which checks RPC chain alignment, USDC, Lendle strategy, and Lendle spender configuration before a live Lendle supply attempt.
+`GET /api/contracts/readiness` also exposes `live_validation.protocol_swaps`, which reports runnable protocols honestly: a protocol counts as runnable only when its strategy and spender are configured and its deposit function is one the transaction builder can encode (`deposit(address,uint256)`, `deposit(address,uint256,address,uint16)`, or `supply(address,uint256,address,uint16)`). Protocols configured with swap-style signatures are listed under `configured_not_runnable` with the reason.
 
 Execution proposals include `allowance_check` when Seer can derive the ERC-20 allowance target. This makes approval routing auditable before a client signs or relays anything:
 

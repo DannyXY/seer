@@ -1,3 +1,8 @@
+// Staged QuoterV2 (Agni) / LBQuoter (Merchant Moe) integration for swap
+// execution. Not yet wired into the execution path; kept until swap
+// signatures are supported by the transaction builder.
+#![allow(dead_code, unused_variables)]
+
 use ethers::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -63,8 +68,8 @@ impl QuoterService {
             .parse()
             .map_err(|_| anyhow::anyhow!("Invalid token_out address"))?;
 
-        let amount_in_u256 = U256::from_dec_str(amount_in)
-            .map_err(|_| anyhow::anyhow!("Invalid amount_in"))?;
+        let amount_in_u256 =
+            U256::from_dec_str(amount_in).map_err(|_| anyhow::anyhow!("Invalid amount_in"))?;
 
         // Agni QuoterV2.quoteExactInputSingle(tokenIn, tokenOut, fee, amountIn, sqrtPriceLimitX96)
         let call_data = ethers::abi::encode(&[
@@ -107,8 +112,8 @@ impl QuoterService {
             .parse()
             .map_err(|_| anyhow::anyhow!("Invalid quoter address"))?;
 
-        let amount_in_u256 = U256::from_dec_str(amount_in)
-            .map_err(|_| anyhow::anyhow!("Invalid amount_in"))?;
+        let amount_in_u256 =
+            U256::from_dec_str(amount_in).map_err(|_| anyhow::anyhow!("Invalid amount_in"))?;
 
         let token_addresses: Result<Vec<Address>, _> = token_path
             .iter()
@@ -131,7 +136,6 @@ impl QuoterService {
         estimated_out: &str,
         slippage_basis_points: u32,
     ) -> anyhow::Result<String> {
-        use std::str::FromStr;
         use ethers_core::types::U256;
 
         let amount = U256::from_str_radix(estimated_out.trim_start_matches("0x"), 16)?;

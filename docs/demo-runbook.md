@@ -157,7 +157,7 @@ This dry-runs the draft through Mantle RPC using `eth_call`. A successful respon
 curl http://localhost:10000/api/contracts/readiness
 ```
 
-Check `live_validation.safe_user_operation` and `live_validation.lendle_supply` before trying either live path. If `ready=false`, the `missing` array names the env/config values to set first.
+Check `live_validation.safe_user_operation` and `live_validation.protocol_swaps` before trying either live path. If `ready=false`, the `missing` array names the env/config values to set first.
 
 For a repeatable local smoke check:
 
@@ -169,7 +169,7 @@ To make the smoke check fail unless a live path is ready:
 
 ```bash
 REQUIRE_SAFE_READY=1 scripts/live-validation-smoke.sh
-REQUIRE_LENDLE_READY=1 scripts/live-validation-smoke.sh
+REQUIRE_PROTOCOL_READY=1 scripts/live-validation-smoke.sh
 ```
 
 To also run the Lendle allowance/simulation preview, provide an authenticated wallet session:

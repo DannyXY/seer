@@ -20,6 +20,11 @@ pub struct Settings {
     pub defillama_base_url: String,
     pub defillama_yields_base_url: String,
     pub mantle_rpc_url: Option<String>,
+    /// Read-only RPC for user portfolio data (token balances, native balance,
+    /// wallet activity). Defaults to Mantle mainnet, where real holdings live,
+    /// while `mantle_rpc_url` stays on the chain where Seer's contracts are
+    /// deployed (Sepolia testnet).
+    pub mantle_data_rpc_url: Option<String>,
     pub mantle_chain_id: u64,
     pub aa_provider_stack: String,
     pub aa_bundler_url: Option<String>,
@@ -34,6 +39,10 @@ pub struct Settings {
     pub mantle_wmnt_address: Option<String>,
     pub mantle_weth_address: Option<String>,
     pub mantle_cmeth_address: Option<String>,
+    /// Execution-chain token addresses ("SYMBOL:0xADDR,SYMBOL:0xADDR").
+    /// When set, transaction drafts use these instead of MANTLE_*_ADDRESS,
+    /// which points at mainnet for portfolio reads.
+    pub exec_token_addresses: Vec<(String, String)>,
     pub approved_strategy_address: Option<String>,
     pub approved_strategy_spender_address: Option<String>,
     pub strategy_deposit_function: String,
@@ -43,9 +52,9 @@ pub struct Settings {
     pub agni_strategy_address: Option<String>,
     pub agni_spender_address: Option<String>,
     pub agni_deposit_function: Option<String>,
-    pub fluxion_strategy_address: Option<String>,
-    pub fluxion_spender_address: Option<String>,
-    pub fluxion_deposit_function: Option<String>,
+    pub lendle_strategy_address: Option<String>,
+    pub lendle_spender_address: Option<String>,
+    pub lendle_deposit_function: Option<String>,
     pub meth_strategy_address: Option<String>,
     pub meth_spender_address: Option<String>,
     pub meth_deposit_function: Option<String>,
@@ -56,6 +65,8 @@ pub struct Settings {
     pub prediction_registry_address: Option<String>,
     pub identity_sbt_address: Option<String>,
     pub intent_registry_address: Option<String>,
+    pub telegram_bot_token: Option<String>,
+    pub telegram_chat_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,6 +119,7 @@ impl Settings {
                 "https://yields.llama.fi",
             ),
             mantle_rpc_url: env_opt("MANTLE_RPC_URL"),
+            mantle_data_rpc_url: Some(env_or("MANTLE_DATA_RPC_URL", "https://rpc.mantle.xyz")),
             mantle_chain_id: env_or("MANTLE_CHAIN_ID", "5003").parse()?,
             aa_provider_stack: env_or("AA_PROVIDER_STACK", "safe-4337-relay-kit"),
             aa_bundler_url: env_opt("AA_BUNDLER_URL"),
@@ -122,6 +134,7 @@ impl Settings {
             mantle_wmnt_address: env_opt("MANTLE_WMNT_ADDRESS"),
             mantle_weth_address: env_opt("MANTLE_WETH_ADDRESS"),
             mantle_cmeth_address: env_opt("MANTLE_CMETH_ADDRESS"),
+            exec_token_addresses: env_symbol_address_pairs("SEER_EXEC_TOKEN_ADDRESSES"),
             approved_strategy_address: env_opt("SEER_APPROVED_STRATEGY_ADDRESS"),
             approved_strategy_spender_address: env_opt("SEER_APPROVED_STRATEGY_SPENDER_ADDRESS"),
             strategy_deposit_function: env_or(
@@ -134,9 +147,9 @@ impl Settings {
             agni_strategy_address: env_opt("SEER_AGNI_STRATEGY_ADDRESS"),
             agni_spender_address: env_opt("SEER_AGNI_SPENDER_ADDRESS"),
             agni_deposit_function: env_opt("SEER_AGNI_DEPOSIT_FUNCTION"),
-            fluxion_strategy_address: env_opt("SEER_FLUXION_STRATEGY_ADDRESS"),
-            fluxion_spender_address: env_opt("SEER_FLUXION_SPENDER_ADDRESS"),
-            fluxion_deposit_function: env_opt("SEER_FLUXION_DEPOSIT_FUNCTION"),
+            lendle_strategy_address: env_opt("SEER_LENDLE_STRATEGY_ADDRESS"),
+            lendle_spender_address: env_opt("SEER_LENDLE_SPENDER_ADDRESS"),
+            lendle_deposit_function: env_opt("SEER_LENDLE_DEPOSIT_FUNCTION"),
             meth_strategy_address: env_opt("SEER_METH_STRATEGY_ADDRESS"),
             meth_spender_address: env_opt("SEER_METH_SPENDER_ADDRESS"),
             meth_deposit_function: env_opt("SEER_METH_DEPOSIT_FUNCTION"),
@@ -147,6 +160,8 @@ impl Settings {
             prediction_registry_address: env_opt("SEER_PREDICTION_REGISTRY_ADDRESS"),
             identity_sbt_address: env_opt("SEER_IDENTITY_SBT_ADDRESS"),
             intent_registry_address: env_opt("SEER_INTENT_REGISTRY_ADDRESS"),
+            telegram_bot_token: env_opt("TELEGRAM_BOT_TOKEN"),
+            telegram_chat_id: env_opt("TELEGRAM_CHAT_ID"),
         })
     }
 }
@@ -169,6 +184,39 @@ fn env_bool(key: &str, default: bool) -> bool {
             )
         })
         .unwrap_or(default)
+}
+
+/// Parse "SYMBOL:0xADDR,SYMBOL:0xADDR" pairs; malformed entries are skipped.
+fn env_symbol_address_pairs(key: &str) -> Vec<(String, String)> {
+    env::var(key)
+        .ok()
+        .map(|value| {
+            value
+                .split(',')
+                .filter_map(|pair| {
+                    let (symbol, address) = pair.split_once(':')?;
+                    let symbol = canonical_token_symbol(symbol.trim());
+                    let address = address.trim();
+                    (!symbol.is_empty() && address.starts_with("0x"))
+                        .then(|| (symbol, address.to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn canonical_token_symbol(symbol: &str) -> String {
+    match symbol.trim().to_uppercase().as_str() {
+        "METH" => "mETH".to_string(),
+        "CMETH" => "cmETH".to_string(),
+        "USDC" => "USDC".to_string(),
+        "USDT" => "USDT".to_string(),
+        "MNT" => "MNT".to_string(),
+        "USDY" => "USDY".to_string(),
+        "WMNT" => "WMNT".to_string(),
+        "WETH" => "WETH".to_string(),
+        other => other.to_string(),
+    }
 }
 
 fn env_csv(key: &str, default: &[&str]) -> Vec<String> {

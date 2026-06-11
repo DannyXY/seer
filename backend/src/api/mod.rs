@@ -27,6 +27,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/wallet/:address/summary", get(wallet::summary))
         .route("/api/wallet/:address/activity", get(wallet::activity))
         .route("/api/wallet/:address/risk", get(wallet::risk))
+        .route("/api/wallet/:address/approvals", get(wallet::approvals))
         .route(
             "/api/settings/:address",
             get(settings::get).post(settings::save),
@@ -104,10 +105,7 @@ pub fn router(state: AppState) -> Router {
             post(agent::revoke_policy),
         )
         .route("/api/agent/intent/:intent_id/stop", post(agent::stop))
-        .route(
-            "/api/positions/agni",
-            post(positions::create_agni_position),
-        )
+        .route("/api/positions/agni", post(positions::create_agni_position))
         .route(
             "/api/positions/merchant-moe",
             post(positions::create_merchant_moe_position),

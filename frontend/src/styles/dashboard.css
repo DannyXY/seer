@@ -76,6 +76,38 @@
   font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--coral);
 }
 .seer-agent-status { background: var(--card-2); border: 1px solid var(--line); border-radius: var(--r-md); padding: 14px; }
+.seer-balance-tabs {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
+  margin: -2px 0 14px; padding: 3px;
+  background: var(--paper-sink); border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+.seer-balance-tab {
+  height: 28px; min-width: 0; border-radius: calc(var(--r-sm) - 2px);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ink-2); font-family: var(--font-mono); font-size: 11px;
+  font-weight: 600; letter-spacing: 0; text-transform: uppercase;
+  transition: background .15s var(--ease), color .15s var(--ease), box-shadow .15s var(--ease);
+}
+.seer-balance-tab:hover { color: var(--ink); background: var(--hover-overlay); }
+.seer-balance-tab.active { color: var(--ink); background: var(--card-2); box-shadow: inset 0 0 0 1px var(--line); }
+.seer-faucet-link {
+  margin-top: 14px; width: 100%; min-height: 38px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: var(--r-sm);
+  border: 1px solid var(--coral-line); background: var(--coral-wash);
+  color: var(--coral-ink); transition: border-color .15s var(--ease), background .15s var(--ease), color .15s var(--ease);
+}
+.seer-faucet-link:hover:not(:disabled) { border-color: var(--volt); background: rgba(200,242,48,0.1); }
+.seer-faucet-link:disabled { cursor: not-allowed; color: var(--ink-3); border-color: var(--line); background: var(--card-2); }
+.seer-faucet-ic {
+  width: 24px; height: 24px; flex: none; border-radius: 99px;
+  background: rgba(200,242,48,0.1); border: 1px solid rgba(200,242,48,0.18);
+}
+.seer-faucet-copy { flex: 1; min-width: 0; text-align: left; font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seer-faucet-amt { font-family: var(--font-mono); font-size: 11px; color: var(--ink-2); white-space: nowrap; }
+.seer-risk-gauge { margin-top: 6px; min-height: 132px; }
+.seer-risk-caption { font-size: 11.5px; text-align: center; margin-top: 6px; }
 
 /* ---------- Main / screens ---------- */
 .seer-main { overflow-y: auto; background: var(--paper); }

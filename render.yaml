@@ -49,6 +49,8 @@ services:
         value: 5003
       - key: MANTLE_RPC_URL
         sync: false
+      - key: MANTLE_DATA_RPC_URL
+        value: https://rpc.mantle.xyz
       - key: AA_PROVIDER_STACK
         value: safe-4337-relay-kit
       - key: CLAUDE_API_KEY
@@ -70,6 +72,8 @@ services:
       - key: MANTLE_MNT_ADDRESS
         sync: false
       - key: MANTLE_METH_ADDRESS
+        sync: false
+      - key: SEER_EXEC_TOKEN_ADDRESSES
         sync: false
       - key: SEER_APPROVED_STRATEGY_ADDRESS
         sync: false
@@ -136,6 +140,8 @@ services:
         value: 5003
       - key: MANTLE_RPC_URL
         sync: false
+      - key: MANTLE_DATA_RPC_URL
+        value: https://rpc.mantle.xyz
       - key: AA_PROVIDER_STACK
         value: safe-4337-relay-kit
       - key: CLAUDE_API_KEY
@@ -157,6 +163,8 @@ services:
       - key: MANTLE_MNT_ADDRESS
         sync: false
       - key: MANTLE_METH_ADDRESS
+        sync: false
+      - key: SEER_EXEC_TOKEN_ADDRESSES
         sync: false
       - key: SEER_APPROVED_STRATEGY_ADDRESS
         sync: false

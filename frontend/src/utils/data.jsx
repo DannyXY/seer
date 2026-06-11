@@ -4,6 +4,8 @@
    the Rust API. No mock banks, no random simulation.
    ============================================================ */
 
+import { sendOnChainTx, getWalletProvider } from './onchain';
+
 {
   const API_BASE = localStorage.getItem("seerApiBase") || window.SEER_API_BASE ||
     (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_API_URL
@@ -16,7 +18,6 @@
     "agni finance": "◇",
     moe: "◎",
     "merchant moe": "◎",
-    fluxion: "❖",
     init: "△",
     "init capital": "△",
     lendle: "⬡",
@@ -88,6 +89,10 @@
     auth: readSession(),
     wallet: readSession()?.wallet_address || null,
     ASSETS: [],
+    MAINNET_ASSETS: [],
+    TESTNET_ASSETS: [],
+    SEER_TOKEN_FAUCET: null,
+    APPROVALS: [],
     CAT,
     TEMPLATES,
     ACTIVE_INTENTS: [],
@@ -220,26 +225,88 @@
     const spend = parsed.spend_amount;
     const asset = spend ? `${Number(spend.amount).toLocaleString()} ${spend.asset}` : (parsed.target_assets || []).join(", ") || "Portfolio";
     const status = String(intent.status || "").toLowerCase() === "paused" ? "PAUSED" : "RUNNING";
+    const executionMode = intent.executionMode || intent.execution_mode || (intent.onchain_intent_id ? "anchor_only" : "simulation_only");
     return {
       id: String(intent.id),
       summary: intent.raw_intent || parsed.action || "Agent intent",
       status,
       asset,
-      lastAction: status === "PAUSED" ? "Paused by you" : "Monitoring conditions",
+      executionMode,
+      anchorTxHash: intent.anchorTxHash || intent.anchor_tx_hash || null,
+      lastAction: status === "PAUSED" ? "Paused by you" : executionMode === "anchor_only" ? "Anchored on-chain; execution is simulation-only" : "Monitoring conditions in simulation",
       lastTs: ms(intent.created_at),
       pnl: 0,
       pnlPct: 0,
       trace: trace || [{
         t: new Date(ms(intent.created_at)).toLocaleString(undefined, { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }),
-        kind: "INTENT CREATED",
-        body: intent.raw_intent || "Intent created and policy drafted.",
+        kind: executionMode === "anchor_only" ? "INTENT ANCHORED" : "SIMULATION CREATED",
+        body: executionMode === "anchor_only"
+          ? "Intent hash is anchored on-chain for auditability. Live autonomous execution is not enabled in this build."
+          : "Intent created as a simulation-only monitor. No executable transaction has been submitted.",
       }],
+    };
+  }
+
+  function previewDraft(proposal) {
+    return proposal?.transaction_draft || null;
+  }
+
+  function draftIsExecutable(draft) {
+    return !!(draft?.to && draft?.data && draft.kind !== "simulation_failed");
+  }
+
+  function capabilityForPreview(proposal, response) {
+    const draft = previewDraft(proposal);
+    if (draftIsExecutable(draft)) {
+      return {
+        mode: "testnet_transaction",
+        label: "Testnet tx ready",
+        tone: "ready",
+        canExecute: true,
+        body: "This path has executable Mantle Sepolia calldata. You can sign it now with your wallet.",
+      };
+    }
+    if (draft?.kind === "simulation_failed") {
+      return {
+        mode: "simulation_failed",
+        label: "Simulation blocked",
+        tone: "danger",
+        canExecute: false,
+        body: draft.human_summary || "The transaction simulation failed, so Seer is not exposing executable calldata.",
+      };
+    }
+    if (response.allowance_error || response.evaluation_error) {
+      return {
+        mode: "simulation_only",
+        label: "Simulation only",
+        tone: "warn",
+        canExecute: false,
+        body: response.allowance_error || response.evaluation_error,
+      };
+    }
+    if (proposal?.actionable === false) {
+      return {
+        mode: "conditions_pending",
+        label: "Watching only",
+        tone: "warn",
+        canExecute: false,
+        body: "The trigger conditions have not passed yet. Seer can anchor and monitor this intent, but there is no transaction to sign now.",
+      };
+    }
+    return {
+      mode: "anchor_only",
+      label: "Anchor only",
+      tone: "warn",
+      canExecute: false,
+      body: "This route can be anchored on-chain for tracking, but live execution is simulation-only in this build until the matching protocol adapter is configured.",
     };
   }
 
   function adaptPreview(rawText, response) {
     const parsed = response.parsed_intent || response.parsedIntent || {};
     const proposal = response.proposal || response;
+    const draft = previewDraft(proposal);
+    const capability = capabilityForPreview(proposal, response);
     const rows = [];
     if (parsed.action) rows.push({ k: "Action", v: parsed.action });
     if (parsed.target_assets?.length) rows.push({ k: "Assets", v: parsed.target_assets.join(" · "), token: parsed.target_assets[0] });
@@ -247,6 +314,9 @@
     if (parsed.spend_amount) rows.push({ k: "Spend", v: `${parsed.spend_amount.amount} ${parsed.spend_amount.asset}`, token: parsed.spend_amount.asset });
     if (parsed.trigger?.schedule) rows.push({ k: "Schedule", v: parsed.trigger.schedule });
     (parsed.constraints || []).slice(0, 3).forEach((constraint, i) => rows.push({ k: i === 0 ? "Guardrail" : "Constraint", v: constraint }));
+    rows.push({ k: "Capability", v: capability.label });
+    if (draft?.kind) rows.push({ k: "Draft", v: draft.kind.replace(/_/g, " ") });
+    if (proposal.network || proposal.chain_id) rows.push({ k: "Network", v: `${proposal.network || "mantle-testnet"}${proposal.chain_id ? ` · ${proposal.chain_id}` : ""}` });
     if (proposal.estimated_gas_usd || proposal.network_fee_usd) rows.push({ k: "Network fee", v: `~$${Number(proposal.estimated_gas_usd || proposal.network_fee_usd).toFixed(2)}` });
     if (!rows.length) rows.push({ k: "Intent", v: rawText });
     const asset = parsed.spend_amount?.asset || parsed.target_assets?.[0] || "Intent";
@@ -254,8 +324,9 @@
       title: "Confirm Seer Agent",
       accent: "OPPORTUNITY",
       rows,
-      chip: { sym: asset, note: response.explanation || "Backend parsed and evaluated this deployable plan." },
+      chip: { sym: asset, note: response.explanation || draft?.human_summary || "Backend parsed and evaluated this plan." },
       rawText,
+      capability,
       backend: response,
     };
   }
@@ -394,19 +465,11 @@
         body: JSON.stringify({ wallet_address: walletAddress }),
       });
 
-      // For Privy wallets, we sign using the Privy signer which is available in the global scope
-      let signature;
-      if (window.privyEthersProvider) {
-        const signer = await window.privyEthersProvider.getSigner();
-        signature = await signer.signMessage(challenge.message);
-      } else if (window.ethereum?.request) {
-        signature = await window.ethereum.request({
-          method: "personal_sign",
-          params: [challenge.message, walletAddress],
-        });
-      } else {
-        throw new Error("No signing provider available.");
-      }
+      // Resolve a signer through the shared provider helper - it waits for
+      // Privy to finish initializing and falls back to an injected wallet.
+      const provider = await getWalletProvider();
+      const signer = await provider.getSigner();
+      const signature = await signer.signMessage(challenge.message);
 
       const session = await request("/api/auth/verify", {
         method: "POST",
@@ -451,7 +514,7 @@
         // Fire signals fetch in background - don't block ready state on it
         SeerAPI.loadPublic().catch(() => update({ signalsLoading: false }));
 
-        const [summary, risk, intentsRes, identity, entriesRes, leaderboardRes, settingsRes, onchainPoints] = await Promise.all([
+        const [summary, risk, intentsRes, identity, entriesRes, leaderboardRes, settingsRes, onchainPoints, approvalsRes] = await Promise.all([
           request(`/api/wallet/${wallet}/summary`),
           request(`/api/wallet/${wallet}/risk`),
           request(`/api/agent/${wallet}/intents`),
@@ -460,12 +523,19 @@
           request("/api/arena/leaderboard"),
           request(`/api/settings/${wallet}`),
           request(`/api/arena/${wallet}/points`).catch(() => null),
+          request(`/api/wallet/${wallet}/approvals`).catch(() => ({ approvals: [] })),
         ]);
         const predictionMap = new Map(state.PREDICTIONS.map((p) => [p.id, p]));
         const intents = (intentsRes.intents || []).map((i) => adaptIntent(i));
         const leaderboard = (leaderboardRes.leaderboard || []).map((r) => adaptLeaderboard(r, wallet));
+        const mainnetAssets = (summary.mainnet_balances || summary.balances || []).map(adaptAsset);
+        const testnetAssets = (summary.testnet_balances || []).map(adaptAsset);
         update({
-          ASSETS: (summary.balances || []).map(adaptAsset),
+          ASSETS: mainnetAssets,
+          MAINNET_ASSETS: mainnetAssets,
+          TESTNET_ASSETS: testnetAssets,
+          SEER_TOKEN_FAUCET: summary.seer_token_faucet_calldata || null,
+          APPROVALS: approvalsRes.approvals || [],
           ACTIVE_INTENTS: intents,
           IDENTITY: adaptIdentity(identity, wallet),
           PERF: { you: [], bench: [] },
@@ -478,7 +548,7 @@
           riskScore: Number(risk.risk_score || summary.risk_score || 0),
           stats: {
             signalsToday: state.SEED_SIGNALS.length,
-            agentAssets: Number(((summary.balances || []).reduce((s, p) => s + Number(p.usd_value || 0), 0) / 1000000).toFixed(2)),
+            agentAssets: Number((mainnetAssets.reduce((s, p) => s + (p.bal * p.usd), 0) / 1000000).toFixed(2)),
             cardsMinted: identity.sbt_token_id ? 1 : 0,
           },
           loading: false,
@@ -488,6 +558,15 @@
         update({ loading: false, ready: false, signalsLoading: false, error: err.message });
         throw err;
       }
+    },
+    async claimSeerTokens() {
+      const faucet = state.SEER_TOKEN_FAUCET;
+      if (!faucet) throw new Error("Seer token faucet is not configured for this environment.");
+      const txHash = await sendOnChainTx(faucet);
+      if (state.wallet) {
+        SeerAPI.bootstrap(state.wallet).catch(() => {});
+      }
+      return { txHash, faucet };
     },
     async refreshLive() {
       if (state.live.paused) return;
@@ -517,14 +596,32 @@
       });
       let evaluation = {};
       try {
-        evaluation = await request("/api/agent/evaluate-intent", {
+        evaluation = await request("/api/agent/evaluate-intent-with-allowance", {
           method: "POST",
           body: JSON.stringify({ wallet_address: wallet, raw_intent: text }),
         });
       } catch (err) {
-        evaluation = { evaluation_error: err.message };
+        try {
+          evaluation = await request("/api/agent/evaluate-intent", {
+            method: "POST",
+            body: JSON.stringify({ wallet_address: wallet, raw_intent: text }),
+          });
+          evaluation.allowance_error = err.message;
+        } catch (fallbackErr) {
+          evaluation = { evaluation_error: fallbackErr.message || err.message };
+        }
       }
       return adaptPreview(text, { ...parsed, ...evaluation });
+    },
+    async signPreviewDraft(card) {
+      const proposal = card?.backend?.proposal || card?.backend;
+      const draft = proposal?.transaction_draft;
+      if (!draft?.to || !draft?.data) {
+        throw new Error("No executable testnet calldata is available for this intent.");
+      }
+      const txHash = await sendOnChainTx(draft);
+      SeerAPI.loadApprovals().catch(() => {});
+      return { txHash, draft };
     },
     async deployIntent(card) {
       const raw = card.rawText || card.backend?.raw_intent || card.title;
@@ -543,6 +640,20 @@
     },
     commitIntent(intent) {
       update({ ACTIVE_INTENTS: [intent, ...state.ACTIVE_INTENTS] });
+    },
+    async loadApprovals() {
+      if (!state.wallet) return [];
+      const res = await request(`/api/wallet/${state.wallet}/approvals`);
+      const approvals = res.approvals || [];
+      update({ APPROVALS: approvals });
+      return approvals;
+    },
+    async revokeApproval(approval) {
+      const calldata = approval?.revoke_calldata;
+      if (!calldata) throw new Error("This approval is already zero or cannot be revoked from Seer.");
+      const txHash = await sendOnChainTx(calldata);
+      SeerAPI.loadApprovals().catch(() => {});
+      return { txHash, approval };
     },
     async setIntentStatus(id, status) {
       const path = status === "PAUSED" ? "pause" : "activate";

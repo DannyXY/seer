@@ -86,6 +86,19 @@ function LoadingScreen({ message = "Seer is loading authenticated Mantle data fr
   );
 }
 
+function ConnectIssueScreen({ title, message, onRetry, onLogout }) {
+  return (
+    <div className="seer-loading-screen">
+      <div className="serif seer-loading-title">{title}</div>
+      <div className="mut seer-loading-copy">{message}</div>
+      <div className="row gap-8" style={{ justifyContent: "center", marginTop: 18 }}>
+        <button className="btn btn-primary" onClick={onRetry}>Try again</button>
+        <button className="btn btn-ghost" onClick={onLogout}>Log out</button>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const { user, login, logout, authenticated, ready: privyReady } = usePrivy();
   const { wallets } = useWallets();
@@ -96,6 +109,7 @@ function App() {
   const [toast, setToast] = useState(null); // { msg, kind: 'info'|'success'|'error' }
   const [navCollapsed, setNavCollapsed] = useState(() => { try { return localStorage.getItem("seerNav") !== "0"; } catch (e) { return true; } });
   const [smartAccount, setSmartAccount] = useState(null);
+  const [connectError, setConnectError] = useState(null);
   const connectingRef = useRef(false); // lock - prevents concurrent sign prompts
 
   const toggleNav = useCallback(() => setNavCollapsed((c) => { const n = !c; try { localStorage.setItem("seerNav", n ? "1" : "0"); } catch (e) {} return n; }), []);
@@ -111,12 +125,13 @@ function App() {
     if (!privyReady || !authenticated || !user || wallets.length === 0 || connected) return;
     if (connectingRef.current) return;
     connectingRef.current = true;
+    setConnectError(null);
     const wallet = wallets[0];
     const setupSmartAccount = async () => {
       try {
+        window.privyWallet = wallet;
         if (wallet.getEthersProvider) {
           window.privyEthersProvider = await wallet.getEthersProvider();
-          window.privyWallet = wallet;
         }
         // Switch embedded wallets (Google/email) to Mantle Sepolia immediately
         // so all subsequent calls are already on the right chain.
@@ -135,6 +150,7 @@ function App() {
         }
       } catch (error) {
         console.error('Error setting up smart account:', error);
+        setConnectError(error.message || "Could not confirm your wallet with the Seer backend.");
         showToast('Failed to connect: ' + error.message, 'error');
       } finally {
         connectingRef.current = false;
@@ -149,13 +165,23 @@ function App() {
   useEffect(() => {
     if (!privyReady || wallets.length === 0) return;
     const wallet = wallets[0];
+    window.privyWallet = wallet;
     if (wallet.getEthersProvider) {
       wallet.getEthersProvider().then((p) => {
         window.privyEthersProvider = p;
-        window.privyWallet = wallet;
       }).catch(() => {});
     }
   }, [privyReady, wallets]);
+
+  // Watchdog: if Privy reports authenticated but never delivers a wallet,
+  // surface an actionable error instead of leaving the user stuck.
+  useEffect(() => {
+    if (!privyReady || !authenticated || connected || wallets.length > 0 || connectError) return;
+    const timer = setTimeout(() => {
+      setConnectError("Your wallet did not finish loading. Log out and back in if this keeps happening.");
+    }, 15000);
+    return () => clearTimeout(timer);
+  }, [privyReady, authenticated, connected, wallets.length, connectError]);
 
   useEffect(() => {
     const current = routeFromPath(window.location.pathname);
@@ -202,27 +228,48 @@ function App() {
   }, [setRoute, showToast]);
 
   const connect = useCallback(async () => {
-    if (connected) { setRoute("agent"); return; }
     if (!authenticated) { login(); return; }
-    if (connectingRef.current) return;
-    if (wallets.length > 0) {
-      connectingRef.current = true;
-      const wallet = wallets[0];
-      try {
-        if (wallet.getEthersProvider) { window.privyEthersProvider = await wallet.getEthersProvider(); window.privyWallet = wallet; }
-        await createSmartAccount(wallet);
-        if (window.SeerAPI) {
-          await window.SeerAPI.connectWalletDirect(wallet.address);
-          setConnected(true);
-          setRoute("agent");
-        }
-      } catch (err) {
-        showToast('Failed to connect: ' + err.message, 'error');
-      } finally {
-        connectingRef.current = false;
+    if (connected) {
+      // If a previous bootstrap failed, kick it off again instead of
+      // landing the user on a stuck loading screen.
+      if (!seer.ready && !seer.loading && seer.wallet && window.SeerAPI) {
+        window.SEER?.update({ error: null });
+        window.SeerAPI.bootstrap(seer.wallet)
+          .then(() => window.SeerLive?.start?.())
+          .catch((err) => {
+            if (err.status === 401) setConnected(false);
+          });
       }
+      setRoute("agent");
+      return;
     }
-  }, [authenticated, connected, login, wallets, setRoute, showToast]);
+    if (connectingRef.current || wallets.length === 0) {
+      // Connection still in flight (or Privy hasn't delivered the wallet yet).
+      // Navigate to the progress screen - the auto-connect effect finishes the
+      // job as soon as the wallet is available.
+      setRoute("agent");
+      if (wallets.length === 0) showToast("Your wallet is still initializing - one moment.", 'info');
+      return;
+    }
+    connectingRef.current = true;
+    setConnectError(null);
+    const wallet = wallets[0];
+    try {
+      window.privyWallet = wallet;
+      if (wallet.getEthersProvider) { window.privyEthersProvider = await wallet.getEthersProvider(); }
+      await createSmartAccount(wallet);
+      if (window.SeerAPI) {
+        await window.SeerAPI.connectWalletDirect(wallet.address);
+        setConnected(true);
+        setRoute("agent");
+      }
+    } catch (err) {
+      setConnectError(err.message || "Could not confirm your wallet with the Seer backend.");
+      showToast('Failed to connect: ' + err.message, 'error');
+    } finally {
+      connectingRef.current = false;
+    }
+  }, [authenticated, connected, login, wallets, setRoute, showToast, seer.ready, seer.loading, seer.wallet]);
 
   const disconnect = useCallback(() => {
     window.SeerLive?.stop?.();
@@ -238,7 +285,43 @@ function App() {
   }
   if (route === "home") return <Landing onEnter={connect} isAuthenticated={true} />;
 
+  // Privy session exists but the Seer session isn't established yet.
+  if (!connected) {
+    if (connectError) {
+      return (
+        <div>
+          <ConnectIssueScreen
+            title="Couldn't finish signing you in."
+            message={connectError}
+            onRetry={() => { setConnectError(null); connect(); }}
+            onLogout={disconnect}
+          />
+          <Toast toast={toast} />
+        </div>
+      );
+    }
+    return (
+      <div>
+        <LoadingScreen message="Confirming your wallet with Seer. This can take a few seconds." />
+        <Toast toast={toast} />
+      </div>
+    );
+  }
+
   if (!seer.ready) {
+    if (seer.error && !seer.loading) {
+      return (
+        <div>
+          <ConnectIssueScreen
+            title="Couldn't load your Seer data."
+            message={seer.error + " The backend may be waking up - retrying usually fixes this."}
+            onRetry={connect}
+            onLogout={disconnect}
+          />
+          <Toast toast={toast} />
+        </div>
+      );
+    }
     return (
       <div>
         <LoadingScreen message={seer.loading ? "Loading wallet, agents, arena, identity, and settings." : "Preparing your authenticated Seer session."} />
@@ -261,7 +344,7 @@ function App() {
     <div className={"seer-app" + (rail ? "" : " no-rail") + (navCollapsed ? " nav-collapsed" : "")}>
       <Sidebar route={route} setRoute={setRoute} onDisconnect={disconnect} badge={0} collapsed={navCollapsed} onToggle={toggleNav} />
       <main className={"seer-main" + (route === "agent" ? " agent-mode" : "")}>{screens[route]}</main>
-      {rail && <RightRail setRoute={setRoute} riskScore={Math.round(seer.riskScore || 0)} />}
+      {rail && <RightRail setRoute={setRoute} riskScore={Math.round(seer.riskScore || 0)} showToast={showToast} />}
       <Toast toast={toast} />
     </div>
   );

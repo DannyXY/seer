@@ -13,7 +13,7 @@ Seer is a wallet intelligence and prediction system for the Mantle Turing Test H
 
 All four contracts are verified on [Mantle Sepolia Explorer](https://explorer.sepolia.mantle.xyz).
 
-Frontend URL: https://seer-mantle.onrender.com/
+Frontend URL: https://seer-frontend.onrender.com/
 Backend URL: https://seer-api-7mlt.onrender.com
 
 ## Architecture
@@ -199,7 +199,7 @@ For example, `accumulate 25 USDC` can produce an `erc20_approve` draft with `to=
 
 `GET /api/contracts/execution-readiness` reports configured token addresses and named protocol destinations, including Merchant Moe, Lendle, Agni Finance, and mETH Protocol. Readiness includes both the execution target and approval spender for each protocol.
 
-`GET /api/contracts/readiness` includes `live_validation.safe_user_operation` and `live_validation.lendle_supply`. Check those before live execution; each object reports `ready`, missing env/config fields, and the next validation step.
+`GET /api/contracts/readiness` includes `live_validation.safe_user_operation` and `live_validation.protocol_swaps`. Check those before live execution; each object reports `ready`, missing env/config fields, and the next validation step. Protocol execution readiness uses the execution-chain token map (`SEER_EXEC_TOKEN_ADDRESSES`) when present, falling back to `MANTLE_*_ADDRESS` only for single-chain setups.
 
 For a repeatable local check against a running API:
 
@@ -207,7 +207,7 @@ For a repeatable local check against a running API:
 scripts/live-validation-smoke.sh
 ```
 
-Set `REQUIRE_SAFE_READY=1` or `REQUIRE_LENDLE_READY=1` to make the script fail when that live path is not fully configured.
+Set `REQUIRE_SAFE_READY=1` or `REQUIRE_PROTOCOL_READY=1` to make the script fail when that live path is not fully configured.
 
 ## Recurring Automation
 

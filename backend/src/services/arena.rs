@@ -229,9 +229,13 @@ impl ArenaService {
         rows
     }
 
-    /// Resolve all expired open predictions given a metric lookup function.
-    /// Returns the IDs of predictions that were resolved.
-    pub fn resolve_expired<F>(&self, fetch_metric: F) -> Vec<Uuid>
+    /// Resolve open predictions that expired at or before `expired_cutoff`,
+    /// given a metric lookup function. Returns the IDs of resolved predictions.
+    pub fn resolve_expired<F>(
+        &self,
+        expired_cutoff: chrono::DateTime<Utc>,
+        fetch_metric: F,
+    ) -> Vec<Uuid>
     where
         F: Fn(&str) -> Option<f64>,
     {
@@ -243,7 +247,9 @@ impl ArenaService {
             .read()
             .expect("arena prediction store poisoned")
             .values()
-            .filter(|p| matches!(p.status, PredictionStatus::Open) && p.expiry_time <= now)
+            .filter(|p| {
+                matches!(p.status, PredictionStatus::Open) && p.expiry_time <= expired_cutoff
+            })
             .cloned()
             .collect();
 
@@ -259,7 +265,11 @@ impl ArenaService {
                 ComparisonOperator::LessThanOrEqual => final_value <= prediction.target_value,
             };
 
-            let outcome_label = if seer_correct { "SeerCorrect" } else { "SeerIncorrect" };
+            let outcome_label = if seer_correct {
+                "SeerCorrect"
+            } else {
+                "SeerIncorrect"
+            };
             prediction.status = PredictionStatus::Resolved;
             prediction.final_value = Some(final_value);
             prediction.result = Some(outcome_label.to_string());
@@ -299,8 +309,9 @@ impl ArenaService {
                 let new_balance = if delta >= 0 {
                     available + entry.points_committed + delta as u32
                 } else {
-                    available.saturating_sub((-delta) as u32 - entry.points_committed.min((-delta) as u32))
-                        + entry.points_committed.saturating_sub((-delta) as u32)
+                    available.saturating_sub(
+                        (-delta) as u32 - entry.points_committed.min((-delta) as u32),
+                    ) + entry.points_committed.saturating_sub((-delta) as u32)
                 };
                 points.insert(wallet_key, new_balance);
             }
@@ -313,7 +324,10 @@ impl ArenaService {
 
     /// Bulk-load predictions into in-memory store without overwriting existing entries.
     pub fn seed_predictions(&self, predictions: Vec<ArenaPrediction>) {
-        let mut store = self.predictions.write().expect("arena prediction store poisoned");
+        let mut store = self
+            .predictions
+            .write()
+            .expect("arena prediction store poisoned");
         for pred in predictions {
             store.entry(pred.id).or_insert(pred);
         }
@@ -329,7 +343,10 @@ impl ArenaService {
 
     /// Set the on-chain prediction ID for the seed prediction (called after contract creation).
     pub fn register_onchain_prediction_id(&self, prediction_id: Uuid, onchain_id: u64) {
-        let mut predictions = self.predictions.write().expect("arena prediction store poisoned");
+        let mut predictions = self
+            .predictions
+            .write()
+            .expect("arena prediction store poisoned");
         if let Some(pred) = predictions.get_mut(&prediction_id) {
             pred.onchain_prediction_id = Some(onchain_id);
         }
@@ -389,7 +406,8 @@ mod tests {
             expiry_time: Utc::now() + Duration::hours(24),
             seer_position: ArenaPosition::BackSeer,
             seer_confidence: 76,
-            reasoning: "Recent smart-money inflows and TVL momentum support this claim.".to_string(),
+            reasoning: "Recent smart-money inflows and TVL momentum support this claim."
+                .to_string(),
             status: PredictionStatus::Open,
             result: None,
             final_value: None,
@@ -412,7 +430,10 @@ mod tests {
     }
 
     fn fund(service: &ArenaService, wallet: &str, amount: u32) {
-        service.points.write().expect("poisoned")
+        service
+            .points
+            .write()
+            .expect("poisoned")
             .insert(wallet.to_lowercase(), amount);
     }
 

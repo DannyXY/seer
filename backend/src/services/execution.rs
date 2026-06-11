@@ -45,6 +45,14 @@ struct ProtocolStrategy {
     adapter_kind: ProtocolAdapterKind,
 }
 
+#[derive(Debug, Clone)]
+pub struct ApprovalTarget {
+    pub token_symbol: String,
+    pub token_address: String,
+    pub spender_label: String,
+    pub spender_address: String,
+}
+
 #[derive(Debug, Clone, Copy)]
 enum ProtocolAdapterKind {
     ConfiguredDeposit,
@@ -60,19 +68,27 @@ impl ProtocolAdapterKind {
 
 impl ExecutionService {
     pub fn new(settings: Settings) -> Self {
-        let token_addresses = [
-            ("USDC", settings.mantle_usdc_address.clone()),
-            ("USDT", settings.mantle_usdt_address.clone()),
-            ("MNT", settings.mantle_mnt_address.clone()),
-            ("mETH", settings.mantle_meth_address.clone()),
-            ("USDY", settings.mantle_usdy_address.clone()),
-            ("WMNT", settings.mantle_wmnt_address.clone()),
-            ("WETH", settings.mantle_weth_address.clone()),
-            ("cmETH", settings.mantle_cmeth_address.clone()),
-        ]
-        .into_iter()
-        .filter_map(|(symbol, address)| address.map(|address| (symbol.to_string(), address)))
-        .collect();
+        // Calldata targets the execution chain (Sepolia testnet), while the
+        // MANTLE_*_ADDRESS set points at mainnet for portfolio reads. When
+        // execution-chain token addresses are provided, they win; otherwise
+        // fall back to the shared set for single-chain setups.
+        let token_addresses = if settings.exec_token_addresses.is_empty() {
+            [
+                ("USDC", settings.mantle_usdc_address.clone()),
+                ("USDT", settings.mantle_usdt_address.clone()),
+                ("MNT", settings.mantle_mnt_address.clone()),
+                ("mETH", settings.mantle_meth_address.clone()),
+                ("USDY", settings.mantle_usdy_address.clone()),
+                ("WMNT", settings.mantle_wmnt_address.clone()),
+                ("WETH", settings.mantle_weth_address.clone()),
+                ("cmETH", settings.mantle_cmeth_address.clone()),
+            ]
+            .into_iter()
+            .filter_map(|(symbol, address)| address.map(|address| (symbol.to_string(), address)))
+            .collect()
+        } else {
+            settings.exec_token_addresses.iter().cloned().collect()
+        };
         let protocol_strategies = protocol_strategies_from_settings(&settings);
         Self {
             chain_id: settings.mantle_chain_id,
@@ -143,6 +159,9 @@ impl ExecutionService {
                 .iter()
                 .map(|protocol| {
                     let strategy = self.action_config.protocol_strategies.get(*protocol);
+                    let signature_supported = strategy
+                        .map(|strategy| deposit_signature_supported(&strategy.deposit_function))
+                        .unwrap_or(false);
                     ProtocolExecutionReadiness {
                         protocol: (*protocol).to_string(),
                         strategy_address: strategy.map(|strategy| strategy.address.clone()),
@@ -153,11 +172,58 @@ impl ExecutionService {
                         adapter_kind: strategy
                             .map(|strategy| strategy.adapter_kind.as_str().to_string())
                             .unwrap_or_else(|| "unconfigured".to_string()),
-                        ready_for_strategy_draft: strategy.is_some(),
+                        signature_supported,
+                        ready_for_strategy_draft: strategy.is_some() && signature_supported,
                     }
                 })
                 .collect(),
         }
+    }
+
+    pub fn approval_targets(&self) -> Vec<ApprovalTarget> {
+        let mut spenders = Vec::new();
+        if let Some(strategy) = self.generic_strategy() {
+            spenders.push((
+                "Approved strategy".to_string(),
+                strategy.approval_spender_address,
+            ));
+        }
+        for (protocol, strategy) in &self.action_config.protocol_strategies {
+            spenders.push((protocol.clone(), strategy.approval_spender_address.clone()));
+        }
+
+        let mut seen = std::collections::HashSet::new();
+        let mut targets = Vec::new();
+        for (token_symbol, token_address) in &self.action_config.token_addresses {
+            if Address::from_str(token_address).is_err() {
+                continue;
+            }
+            for (spender_label, spender_address) in &spenders {
+                if Address::from_str(spender_address).is_err() {
+                    continue;
+                }
+                let key = format!(
+                    "{}:{}",
+                    token_address.to_lowercase(),
+                    spender_address.to_lowercase()
+                );
+                if !seen.insert(key) {
+                    continue;
+                }
+                targets.push(ApprovalTarget {
+                    token_symbol: token_symbol.clone(),
+                    token_address: token_address.clone(),
+                    spender_label: spender_label.clone(),
+                    spender_address: spender_address.clone(),
+                });
+            }
+        }
+        targets.sort_by(|left, right| {
+            left.token_symbol
+                .cmp(&right.token_symbol)
+                .then(left.spender_label.cmp(&right.spender_label))
+        });
+        targets
     }
 
     pub fn allowance_request_for_intent(
@@ -467,7 +533,11 @@ impl ExecutionService {
         }
     }
 
-    fn build_swap_draft(&self, parsed: &ParsedIntent, wallet_address: &str) -> Option<TransactionDraft> {
+    fn build_swap_draft(
+        &self,
+        parsed: &ParsedIntent,
+        _wallet_address: &str,
+    ) -> Option<TransactionDraft> {
         let assets = &parsed.target_assets;
         if assets.len() < 2 {
             return None;
@@ -499,8 +569,13 @@ impl ExecutionService {
             chain_id: self.chain_id,
             human_summary: format!(
                 "Stake {} {} into {}",
-                spend.amount, spend.asset,
-                parsed.target_protocols.first().map(|p| p.as_str()).unwrap_or("protocol")
+                spend.amount,
+                spend.asset,
+                parsed
+                    .target_protocols
+                    .first()
+                    .map(|p| p.as_str())
+                    .unwrap_or("protocol")
             ),
         })
     }
@@ -636,6 +711,19 @@ impl ExecutionService {
     }
 }
 
+/// Function signatures `build_strategy_deposit_draft` can actually encode.
+/// Keep in sync with the match arms in that builder: anything outside this set
+/// is "configured", not runnable.
+pub const SUPPORTED_DEPOSIT_SIGNATURES: [&str; 3] = [
+    "deposit(address,uint256)",
+    "deposit(address,uint256,address,uint16)",
+    "supply(address,uint256,address,uint16)",
+];
+
+pub fn deposit_signature_supported(signature: &str) -> bool {
+    SUPPORTED_DEPOSIT_SIGNATURES.contains(&signature.trim())
+}
+
 fn token_decimals(asset: &str) -> u32 {
     match asset {
         "USDC" | "USDT" => 6,
@@ -644,11 +732,17 @@ fn token_decimals(asset: &str) -> u32 {
 }
 
 fn known_protocols() -> [&'static str; 5] {
-    ["Merchant Moe", "Agni Finance", "Fluxion Network", "mETH Protocol", "Ondo USDY"]
+    [
+        "Merchant Moe",
+        "Agni Finance",
+        "Lendle",
+        "mETH Protocol",
+        "Ondo USDY",
+    ]
 }
 
 fn protocol_requires_explicit_config(protocol: &str) -> bool {
-    matches!(protocol, "Merchant Moe" | "Agni Finance" | "Fluxion Network")
+    matches!(protocol, "Merchant Moe" | "Agni Finance" | "Lendle")
 }
 
 fn protocol_strategies_from_settings(settings: &Settings) -> HashMap<String, ProtocolStrategy> {
@@ -672,9 +766,9 @@ fn protocol_strategies_from_settings(settings: &Settings) -> HashMap<String, Pro
     insert_protocol_strategy(
         &mut strategies,
         known_protocols()[2],
-        settings.fluxion_strategy_address.clone(),
-        settings.fluxion_spender_address.clone(),
-        settings.fluxion_deposit_function.clone(),
+        settings.lendle_strategy_address.clone(),
+        settings.lendle_spender_address.clone(),
+        settings.lendle_deposit_function.clone(),
         &settings.strategy_deposit_function,
     );
     insert_protocol_strategy(
@@ -1073,6 +1167,28 @@ mod tests {
         assert!(readiness.protocols.iter().any(|protocol| {
             protocol.protocol == "Ondo USDY" && !protocol.ready_for_strategy_draft
         }));
+    }
+
+    #[test]
+    fn swap_signature_is_configured_but_not_runnable() {
+        let mut settings = Settings::from_env().unwrap();
+        settings.merchant_moe_strategy_address =
+            Some("0x0000000000000000000000000000000000000003".to_string());
+        settings.merchant_moe_deposit_function = Some(
+            "swapExactTokensForTokens(uint256,uint256,uint256[],uint8[],address[],address,uint256)"
+                .to_string(),
+        );
+        let execution = ExecutionService::new(settings);
+        let readiness = execution.readiness();
+
+        let moe = readiness
+            .protocols
+            .iter()
+            .find(|protocol| protocol.protocol == "Merchant Moe")
+            .unwrap();
+        assert!(moe.strategy_address.is_some());
+        assert!(!moe.signature_supported);
+        assert!(!moe.ready_for_strategy_draft);
     }
 
     #[tokio::test]

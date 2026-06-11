@@ -51,11 +51,8 @@ pub async fn save(
     let settings = state.services.settings.save(&address, settings);
 
     // Persist to DB so settings survive server restarts.
-    let _ = persist_user_settings(
-        state.services.infra.postgres.as_ref(),
-        &address,
-        &settings,
-    ).await;
+    let _ =
+        persist_user_settings(state.services.infra.postgres.as_ref(), &address, &settings).await;
 
     Ok(Json(json!({
         "wallet_address": address,

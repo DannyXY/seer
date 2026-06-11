@@ -1,24 +1,30 @@
+use ethers::signers::{LocalWallet, Signer};
 use ethers_core::{
     abi::{encode, Token},
     types::{transaction::eip2718::TypedTransaction, Address, Bytes, TransactionRequest, U256},
     utils::id,
 };
-use ethers::signers::{LocalWallet, Signer};
 use serde_json::{json, Value};
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::config::Settings;
-use crate::models::execution::{
-    Erc20AllowanceRequest, Erc20AllowanceResponse, SendRawTransactionRequest,
-    SendRawTransactionResponse, SendUserOperationRequest, SendUserOperationResponse,
-    SimulateTransactionRequest, SimulateTransactionResponse, UserOperationReceiptRequest,
+use crate::models::{
+    execution::{
+        Erc20AllowanceRequest, Erc20AllowanceResponse, SendRawTransactionRequest,
+        SendRawTransactionResponse, SendUserOperationRequest, SendUserOperationResponse,
+        SimulateTransactionRequest, SimulateTransactionResponse, UserOperationReceiptRequest,
+    },
+    wallet::FaucetCalldata,
 };
 
 #[derive(Clone)]
 pub struct ContractService {
     pub rpc_url: Option<String>,
+    /// Read-only RPC for user portfolio data (mainnet). Falls back to `rpc_url`
+    /// when unset so single-chain dev setups keep working.
+    pub data_rpc_url: Option<String>,
     pub private_key: Option<String>,
     pub chain_id: u64,
     pub arena_points_address: Option<String>,
@@ -29,6 +35,12 @@ pub struct ContractService {
     pub aa_bundler_url: Option<String>,
     pub aa_entry_point_address: Option<String>,
     pub aa_paymaster_url: Option<String>,
+    /// (symbol, contract address) pairs for ERC-20 balance reads.
+    token_addresses: Vec<(String, String)>,
+    /// Execution-chain ERC-20s used by agent drafts and testnet wallet display.
+    exec_token_addresses: Vec<(String, String)>,
+    /// ERC-20 decimals cache keyed by contract address.
+    decimals_cache: Arc<Mutex<std::collections::HashMap<String, u32>>>,
     client: reqwest::Client,
     /// Serialises all backend-signed transactions so each one gets a fresh,
     /// sequential nonce — prevents "nonce too low" errors under concurrent load.
@@ -37,8 +49,35 @@ pub struct ContractService {
 
 impl ContractService {
     pub fn new(settings: Settings) -> Self {
+        // MNT uses the native-token placeholder address; its balance comes
+        // from eth_getBalance, so it is excluded from ERC-20 reads.
+        let token_addresses = [
+            ("USDC", &settings.mantle_usdc_address),
+            ("USDT", &settings.mantle_usdt_address),
+            ("mETH", &settings.mantle_meth_address),
+            ("USDY", &settings.mantle_usdy_address),
+            ("WMNT", &settings.mantle_wmnt_address),
+            ("WETH", &settings.mantle_weth_address),
+            ("cmETH", &settings.mantle_cmeth_address),
+        ]
+        .into_iter()
+        .filter_map(|(symbol, address)| {
+            address
+                .clone()
+                .filter(|addr| !addr.to_lowercase().ends_with("dead0000"))
+                .map(|addr| (symbol.to_string(), addr))
+        })
+        .collect();
+        let exec_token_addresses = settings
+            .exec_token_addresses
+            .iter()
+            .filter(|(_, address)| Address::from_str(address).is_ok())
+            .cloned()
+            .collect();
+
         Self {
-            rpc_url: settings.mantle_rpc_url,
+            rpc_url: settings.mantle_rpc_url.clone(),
+            data_rpc_url: settings.mantle_data_rpc_url.or(settings.mantle_rpc_url),
             private_key: settings.backend_signer_private_key,
             chain_id: settings.mantle_chain_id,
             arena_points_address: settings.arena_points_address,
@@ -49,6 +88,9 @@ impl ContractService {
             aa_bundler_url: settings.aa_bundler_url,
             aa_entry_point_address: settings.aa_entry_point_address,
             aa_paymaster_url: settings.aa_paymaster_url,
+            token_addresses,
+            exec_token_addresses,
+            decimals_cache: Arc::new(Mutex::new(std::collections::HashMap::new())),
             client: reqwest::Client::new(),
             nonce_lock: Arc::new(Mutex::new(())),
         }
@@ -237,6 +279,13 @@ impl ContractService {
         })
     }
 
+    pub fn erc20_approve_calldata(&self, spender_address: &str, amount: U256) -> Option<String> {
+        let spender = Address::from_str(spender_address).ok()?;
+        let mut data = id("approve(address,uint256)")[..4].to_vec();
+        data.extend(encode(&[Token::Address(spender), Token::Uint(amount)]));
+        Some(format!("0x{}", hex_encode(&data)))
+    }
+
     pub async fn simulate_transaction(
         &self,
         request: SimulateTransactionRequest,
@@ -306,10 +355,17 @@ impl ContractService {
 
     /// Returns (to, calldata) for user to sign `SeerIntentRegistry.registerIntent(bytes32, string)`.
     /// `intent_hash_hex` must be a 32-byte hex string (with or without 0x prefix).
-    pub fn register_intent_calldata(&self, intent_hash_hex: &str, metadata_uri: &str) -> Option<(String, String)> {
+    pub fn register_intent_calldata(
+        &self,
+        intent_hash_hex: &str,
+        metadata_uri: &str,
+    ) -> Option<(String, String)> {
         let to = self.intent_registry_address.clone()?;
-        let bytes = ethers_core::utils::hex::decode(intent_hash_hex.trim_start_matches("0x")).ok()?;
-        if bytes.len() != 32 { return None; }
+        let bytes =
+            ethers_core::utils::hex::decode(intent_hash_hex.trim_start_matches("0x")).ok()?;
+        if bytes.len() != 32 {
+            return None;
+        }
         let mut fixed = [0u8; 32];
         fixed.copy_from_slice(&bytes);
         let mut data = id("registerIntent(bytes32,string)")[..4].to_vec();
@@ -464,8 +520,9 @@ impl ContractService {
                     return None;
                 }
                 let position = data[31]; // last byte of first 32-byte slot
-                let points =
-                    U256::from_big_endian(&data[32..64]).min(U256::from(u64::MAX)).as_u64();
+                let points = U256::from_big_endian(&data[32..64])
+                    .min(U256::from(u64::MAX))
+                    .as_u64();
 
                 Some((prediction_id, position, points))
             })
@@ -502,19 +559,30 @@ impl ContractService {
 
     /// Read `SeerIdentitySBT.tokenOfOwner(wallet)` — returns 0 if not minted.
     pub async fn identity_token_of_owner(&self, wallet: &str) -> anyhow::Result<u64> {
-        let rpc_url = self.rpc_url.as_ref().ok_or_else(|| anyhow::anyhow!("MANTLE_RPC_URL not configured"))?;
-        let to = self.identity_sbt_address.as_ref().ok_or_else(|| anyhow::anyhow!("IDENTITY_SBT_ADDRESS not configured"))?;
-        let addr = Address::from_str(wallet).map_err(|e| anyhow::anyhow!("bad wallet address: {e}"))?;
+        let rpc_url = self
+            .rpc_url
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("MANTLE_RPC_URL not configured"))?;
+        let to = self
+            .identity_sbt_address
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("IDENTITY_SBT_ADDRESS not configured"))?;
+        let addr =
+            Address::from_str(wallet).map_err(|e| anyhow::anyhow!("bad wallet address: {e}"))?;
         let mut data = id("tokenOfOwner(address)")[..4].to_vec();
         data.extend(encode(&[Token::Address(addr)]));
         let result = self.eth_call(rpc_url, to, &data).await?;
-        Ok(u256_from_return_data(&result).min(U256::from(u64::MAX)).as_u64())
+        Ok(u256_from_return_data(&result)
+            .min(U256::from(u64::MAX))
+            .as_u64())
     }
 
     /// Backend-signed: call `SeerIdentitySBT.mintIdentity(user, uri)`.
     /// Returns the minted token ID.
     pub async fn mint_identity_on_chain(&self, user: &str, uri: &str) -> anyhow::Result<u64> {
-        let to = self.identity_sbt_address.as_ref()
+        let to = self
+            .identity_sbt_address
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("IDENTITY_SBT_ADDRESS not configured"))?;
         let to_addr = Address::from_str(to)?;
         let user_addr = Address::from_str(user)?;
@@ -532,13 +600,21 @@ impl ContractService {
 
     /// Poll for receipt and extract IdentityMinted(user, tokenId, uri) event.
     async fn wait_for_identity_minted(&self, tx_hash: &str) -> anyhow::Result<u64> {
-        let rpc_url = self.rpc_url.as_ref().ok_or_else(|| anyhow::anyhow!("no rpc"))?;
+        let rpc_url = self
+            .rpc_url
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no rpc"))?;
         let event_sig = "IdentityMinted(address,uint256,string)";
-        let topic0 = format!("0x{}", hex_encode(&ethers_core::utils::keccak256(event_sig.as_bytes())));
+        let topic0 = format!(
+            "0x{}",
+            hex_encode(&ethers_core::utils::keccak256(event_sig.as_bytes()))
+        );
 
         for _ in 0..30 {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            let response = self.rpc_call(rpc_url, "eth_getTransactionReceipt", json!([tx_hash])).await?;
+            let response = self
+                .rpc_call(rpc_url, "eth_getTransactionReceipt", json!([tx_hash]))
+                .await?;
             let Some(receipt) = response.get("result").filter(|v| !v.is_null()) else {
                 continue;
             };
@@ -546,13 +622,21 @@ impl ContractService {
                 anyhow::bail!("mintIdentity transaction reverted");
             }
             let empty_logs = vec![];
-            let logs = receipt.get("logs").and_then(Value::as_array).unwrap_or(&empty_logs);
+            let logs = receipt
+                .get("logs")
+                .and_then(Value::as_array)
+                .unwrap_or(&empty_logs);
             for log in logs {
                 let empty_topics = vec![];
-                let topics = log.get("topics").and_then(Value::as_array).unwrap_or(&empty_topics);
+                let topics = log
+                    .get("topics")
+                    .and_then(Value::as_array)
+                    .unwrap_or(&empty_topics);
                 if topics.first().and_then(Value::as_str) == Some(&topic0) {
                     if let Some(id_hex) = topics.get(2).and_then(Value::as_str) {
-                        let id_bytes = ethers_core::utils::hex::decode(id_hex.trim_start_matches("0x")).unwrap_or_default();
+                        let id_bytes =
+                            ethers_core::utils::hex::decode(id_hex.trim_start_matches("0x"))
+                                .unwrap_or_default();
                         let id_val = U256::from_big_endian(&id_bytes);
                         return Ok(id_val.min(U256::from(u64::MAX)).as_u64());
                     }
@@ -573,7 +657,12 @@ impl ContractService {
     }
 
     /// Returns (to, calldata) for user to sign `SeerPredictionRegistry.enterPrediction()`.
-    pub fn enter_prediction_calldata(&self, onchain_id: u64, position: u8, amount: u64) -> Option<(String, String)> {
+    pub fn enter_prediction_calldata(
+        &self,
+        onchain_id: u64,
+        position: u8,
+        amount: u64,
+    ) -> Option<(String, String)> {
         let to = self.prediction_registry_address.clone()?;
         let mut data = id("enterPrediction(uint256,uint8,uint256)")[..4].to_vec();
         data.extend(encode(&[
@@ -586,46 +675,277 @@ impl ContractService {
 
     /// Read `SeerArenaPoints.getAvailablePoints(wallet)` via eth_call.
     pub async fn read_available_points(&self, wallet: &str) -> anyhow::Result<u64> {
-        let rpc_url = self.rpc_url.as_ref().ok_or_else(|| anyhow::anyhow!("MANTLE_RPC_URL not configured"))?;
-        let to = self.arena_points_address.as_ref().ok_or_else(|| anyhow::anyhow!("SEER_ARENA_POINTS_ADDRESS not configured"))?;
-        let addr = Address::from_str(wallet).map_err(|e| anyhow::anyhow!("bad wallet address: {e}"))?;
-        let mut data = id("getAvailablePoints(address)")[..4].to_vec();
-        data.extend(encode(&[Token::Address(addr)]));
-        let result = self.eth_call(rpc_url, to, &data).await?;
-        Ok(u256_from_return_data(&result).min(U256::from(u64::MAX)).as_u64())
-    }
-
-    /// Check `SeerArenaPoints.claimedStarterPoints(wallet)` via eth_call.
-    pub async fn has_claimed_starter_points(&self, wallet: &str) -> anyhow::Result<bool> {
-        let rpc_url = self.rpc_url.as_ref().ok_or_else(|| anyhow::anyhow!("MANTLE_RPC_URL not configured"))?;
-        let to = self.arena_points_address.as_ref().ok_or_else(|| anyhow::anyhow!("SEER_ARENA_POINTS_ADDRESS not configured"))?;
-        let addr = Address::from_str(wallet).map_err(|e| anyhow::anyhow!("bad wallet address: {e}"))?;
-        let mut data = id("claimedStarterPoints(address)")[..4].to_vec();
-        data.extend(encode(&[Token::Address(addr)]));
-        let result = self.eth_call(rpc_url, to, &data).await?;
-        let bytes = ethers_core::utils::hex::decode(result.trim_start_matches("0x")).unwrap_or_default();
-        Ok(bytes.last().copied().unwrap_or(0) != 0)
-    }
-
-    /// Fetch the native MNT balance for `wallet` via `eth_getBalance` on Mantle RPC.
-    /// Returns (raw_wei_as_string, human_readable_mnt, usd_value_placeholder).
-    pub async fn get_native_balance(&self, wallet: &str) -> anyhow::Result<(String, f64)> {
         let rpc_url = self
             .rpc_url
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("MANTLE_RPC_URL not configured"))?;
+        let to = self
+            .arena_points_address
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("SEER_ARENA_POINTS_ADDRESS not configured"))?;
+        let addr =
+            Address::from_str(wallet).map_err(|e| anyhow::anyhow!("bad wallet address: {e}"))?;
+        let mut data = id("getAvailablePoints(address)")[..4].to_vec();
+        data.extend(encode(&[Token::Address(addr)]));
+        let result = self.eth_call(rpc_url, to, &data).await?;
+        Ok(u256_from_return_data(&result)
+            .min(U256::from(u64::MAX))
+            .as_u64())
+    }
+
+    /// Check `SeerArenaPoints.claimedStarterPoints(wallet)` via eth_call.
+    pub async fn has_claimed_starter_points(&self, wallet: &str) -> anyhow::Result<bool> {
+        let rpc_url = self
+            .rpc_url
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("MANTLE_RPC_URL not configured"))?;
+        let to = self
+            .arena_points_address
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("SEER_ARENA_POINTS_ADDRESS not configured"))?;
+        let addr =
+            Address::from_str(wallet).map_err(|e| anyhow::anyhow!("bad wallet address: {e}"))?;
+        let mut data = id("claimedStarterPoints(address)")[..4].to_vec();
+        data.extend(encode(&[Token::Address(addr)]));
+        let result = self.eth_call(rpc_url, to, &data).await?;
+        let bytes =
+            ethers_core::utils::hex::decode(result.trim_start_matches("0x")).unwrap_or_default();
+        Ok(bytes.last().copied().unwrap_or(0) != 0)
+    }
+
+    /// Returns user-signed calldata for minting Seer's configured testnet USDC.
+    /// The token must expose `mint(address,uint256)`, as `SeerTestToken` does.
+    pub fn seer_token_faucet_calldata(&self, wallet: &str) -> Option<FaucetCalldata> {
+        let (_, token_address) = self
+            .exec_token_addresses
+            .iter()
+            .find(|(symbol, _)| symbol.eq_ignore_ascii_case("USDC"))?;
+        let wallet_addr = Address::from_str(wallet).ok()?;
+        let amount_units = U256::from(100_000_000u64); // 100 USDC with 6 decimals.
+        let mut data = id("mint(address,uint256)")[..4].to_vec();
+        data.extend(encode(&[
+            Token::Address(wallet_addr),
+            Token::Uint(amount_units),
+        ]));
+
+        Some(FaucetCalldata {
+            label: "Seer test USDC faucet".to_string(),
+            token_symbol: "USDC".to_string(),
+            token_address: token_address.clone(),
+            amount: "100".to_string(),
+            to: token_address.clone(),
+            data: format!("0x{}", hex_encode(&data)),
+            chain_id: self.chain_id,
+        })
+    }
+
+    /// Fetch the native MNT balance for `wallet` via `eth_getBalance`.
+    /// Returns (raw_wei_as_string, human_readable_mnt).
+    async fn native_balance_on_rpc(
+        &self,
+        rpc_url: &str,
+        wallet: &str,
+    ) -> anyhow::Result<(String, f64)> {
         let response = self
-            .rpc_call(rpc_url, "eth_getBalance", serde_json::json!([wallet, "latest"]))
+            .rpc_call(
+                rpc_url,
+                "eth_getBalance",
+                serde_json::json!([wallet, "latest"]),
+            )
             .await?;
         let hex = response
             .get("result")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("eth_getBalance missing result"))?;
-        let wei = u128::from_str_radix(hex.trim_start_matches("0x"), 16)
-            .unwrap_or(0);
+        let wei = u128::from_str_radix(hex.trim_start_matches("0x"), 16).unwrap_or(0);
         // MNT has 18 decimals
         let mnt = wei as f64 / 1e18;
         Ok((hex.to_string(), mnt))
+    }
+
+    /// Fetch the native MNT balance for `wallet` via the mainnet data RPC.
+    pub async fn get_native_balance(&self, wallet: &str) -> anyhow::Result<(String, f64)> {
+        let rpc_url = self
+            .data_rpc_url
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("MANTLE_DATA_RPC_URL not configured"))?;
+        self.native_balance_on_rpc(rpc_url, wallet).await
+    }
+
+    /// On-chain transaction count (nonce) for a wallet. Ground truth for
+    /// outgoing activity on Mantle, unlike provider placeholders.
+    pub async fn get_transaction_count(&self, wallet: &str) -> anyhow::Result<u64> {
+        let rpc_url = self
+            .data_rpc_url
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("MANTLE_DATA_RPC_URL not configured"))?;
+        let response = self
+            .rpc_call(
+                rpc_url,
+                "eth_getTransactionCount",
+                json!([wallet, "latest"]),
+            )
+            .await?;
+        let hex = response
+            .get("result")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow::anyhow!("eth_getTransactionCount missing result"))?;
+        Ok(u64::from_str_radix(hex.trim_start_matches("0x"), 16).unwrap_or(0))
+    }
+
+    async fn token_balances_on_rpc(
+        &self,
+        rpc_url: &str,
+        wallet: &str,
+        token_addresses: &[(String, String)],
+    ) -> anyhow::Result<Vec<(String, f64)>> {
+        let wallet_addr = Address::from_str(wallet)?;
+
+        let mut balances = Vec::new();
+        for (symbol, token_address) in token_addresses {
+            let mut calldata = id("balanceOf(address)")[..4].to_vec();
+            calldata.extend(encode(&[Token::Address(wallet_addr)]));
+            let raw = match self.eth_call(rpc_url, token_address, &calldata).await {
+                Ok(raw) => raw,
+                Err(err) => {
+                    tracing::debug!(symbol, error = %err, "erc20 balance read failed");
+                    continue;
+                }
+            };
+            let balance = u256_from_return_data(&raw);
+            if balance.is_zero() {
+                continue;
+            }
+            let decimals = self.erc20_decimals(rpc_url, token_address).await;
+            let amount = u256_to_f64(balance) / 10f64.powi(decimals as i32);
+            balances.push((symbol.clone(), amount));
+        }
+        Ok(balances)
+    }
+
+    /// Read all configured mainnet ERC-20 token balances for a wallet directly
+    /// from chain. Returns (symbol, human-readable amount) for non-zero balances.
+    pub async fn get_token_balances(&self, wallet: &str) -> anyhow::Result<Vec<(String, f64)>> {
+        let rpc_url = self
+            .data_rpc_url
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("MANTLE_DATA_RPC_URL not configured"))?;
+        self.token_balances_on_rpc(rpc_url, wallet, &self.token_addresses)
+            .await
+    }
+
+    /// ERC-20 decimals, cached per token address. Defaults to 18 on failure.
+    async fn erc20_decimals(&self, rpc_url: &str, token_address: &str) -> u32 {
+        {
+            let cache = self.decimals_cache.lock().await;
+            if let Some(decimals) = cache.get(token_address) {
+                return *decimals;
+            }
+        }
+        let calldata = id("decimals()")[..4].to_vec();
+        let decimals = match self.eth_call(rpc_url, token_address, &calldata).await {
+            Ok(raw) => {
+                let value = u256_from_return_data(&raw);
+                value.min(U256::from(77u8)).as_u32()
+            }
+            Err(_) => 18,
+        };
+        self.decimals_cache
+            .lock()
+            .await
+            .insert(token_address.to_string(), decimals);
+        decimals
+    }
+
+    async fn portfolio_for_rpc(
+        &self,
+        rpc_url: &str,
+        wallet: &str,
+        token_addresses: &[(String, String)],
+    ) -> PortfolioSnapshot {
+        let prices = self.token_prices().await;
+        let mut positions = Vec::new();
+
+        if let Ok((_, mnt_amount)) = self.native_balance_on_rpc(rpc_url, wallet).await {
+            if mnt_amount > 0.0 {
+                positions.push(PortfolioHolding {
+                    symbol: "MNT".to_string(),
+                    amount: mnt_amount,
+                    usd_value: mnt_amount * usd_price_for("MNT", &prices),
+                });
+            }
+        }
+
+        if let Ok(token_balances) = self
+            .token_balances_on_rpc(rpc_url, wallet, token_addresses)
+            .await
+        {
+            for (symbol, amount) in token_balances {
+                positions.push(PortfolioHolding {
+                    usd_value: amount * usd_price_for(&symbol, &prices),
+                    symbol,
+                    amount,
+                });
+            }
+        }
+
+        let total_usd = positions.iter().map(|p| p.usd_value).sum();
+        PortfolioSnapshot {
+            total_usd,
+            positions,
+        }
+    }
+
+    /// Full mainnet portfolio for a wallet: native MNT plus every configured
+    /// ERC-20 with a non-zero balance, each priced in USD. This is the single
+    /// source of truth for portfolio value across the wallet summary and the
+    /// identity card, replacing provider placeholder values.
+    pub async fn get_portfolio(&self, wallet: &str) -> PortfolioSnapshot {
+        let Some(rpc_url) = self.data_rpc_url.as_deref() else {
+            return PortfolioSnapshot {
+                total_usd: 0.0,
+                positions: Vec::new(),
+            };
+        };
+        self.portfolio_for_rpc(rpc_url, wallet, &self.token_addresses)
+            .await
+    }
+
+    /// Full execution-chain portfolio for testnet balances in the wallet rail.
+    pub async fn get_execution_portfolio(&self, wallet: &str) -> PortfolioSnapshot {
+        let Some(rpc_url) = self.rpc_url.as_deref() else {
+            return PortfolioSnapshot {
+                total_usd: 0.0,
+                positions: Vec::new(),
+            };
+        };
+        self.portfolio_for_rpc(rpc_url, wallet, &self.exec_token_addresses)
+            .await
+    }
+
+    /// Fetch USD prices for the Mantle token set from DefiLlama's free coins
+    /// API. Returns an empty map on failure; callers then value those tokens
+    /// at 0 rather than fabricating a price.
+    async fn token_prices(&self) -> std::collections::HashMap<&'static str, f64> {
+        let mut prices = std::collections::HashMap::new();
+        let url = "https://coins.llama.fi/prices/current/coingecko:mantle,coingecko:ethereum,coingecko:mantle-staked-ether";
+        let Ok(response) = self.client.get(url).send().await else {
+            return prices;
+        };
+        let Ok(payload) = response.json::<Value>().await else {
+            return prices;
+        };
+        for coin in ["mantle", "ethereum", "mantle-staked-ether"] {
+            if let Some(price) = payload
+                .get("coins")
+                .and_then(|c| c.get(format!("coingecko:{coin}")))
+                .and_then(|c| c.get("price"))
+                .and_then(Value::as_f64)
+            {
+                prices.insert(coin, price);
+            }
+        }
+        prices
     }
 
     /// Backend-signed: call `SeerPredictionRegistry.createPrediction()`, return on-chain prediction ID.
@@ -635,14 +955,17 @@ impl ContractService {
         data_key: [u8; 32],
         target_value: u64,
         expiry_unix: u64,
-        comparison_op: u8,  // 0 = Gte, 1 = Lte
-        seer_position: u8,  // 0 = BackSeer, 1 = ChallengeSeer
+        comparison_op: u8, // 0 = Gte, 1 = Lte
+        seer_position: u8, // 0 = BackSeer, 1 = ChallengeSeer
     ) -> anyhow::Result<u64> {
-        let to = self.prediction_registry_address.as_ref()
+        let to = self
+            .prediction_registry_address
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("SEER_PREDICTION_REGISTRY_ADDRESS not configured"))?;
         let to_addr = Address::from_str(to)?;
 
-        let mut calldata = id("createPrediction(string,bytes32,uint256,uint256,uint8,uint8)")[..4].to_vec();
+        let mut calldata =
+            id("createPrediction(string,bytes32,uint256,uint256,uint8,uint8)")[..4].to_vec();
         calldata.extend(encode(&[
             Token::String(claim.to_string()),
             Token::FixedBytes(data_key.to_vec()),
@@ -665,7 +988,9 @@ impl ContractService {
         outcome: u8,
         final_value: u64,
     ) -> anyhow::Result<String> {
-        let to = self.prediction_registry_address.as_ref()
+        let to = self
+            .prediction_registry_address
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("SEER_PREDICTION_REGISTRY_ADDRESS not configured"))?;
         let to_addr = Address::from_str(to)?;
 
@@ -688,7 +1013,9 @@ impl ContractService {
         onchain_prediction_id: u64,
         user: &str,
     ) -> anyhow::Result<String> {
-        let to = self.prediction_registry_address.as_ref()
+        let to = self
+            .prediction_registry_address
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("SEER_PREDICTION_REGISTRY_ADDRESS not configured"))?;
         let to_addr = Address::from_str(to)?;
         let user_addr = Address::from_str(user)?;
@@ -706,10 +1033,15 @@ impl ContractService {
 
     /// Poll for a transaction receipt and fail if the transaction reverted.
     async fn wait_for_receipt_success(&self, tx_hash: &str) -> anyhow::Result<()> {
-        let rpc_url = self.rpc_url.as_ref().ok_or_else(|| anyhow::anyhow!("no rpc"))?;
+        let rpc_url = self
+            .rpc_url
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no rpc"))?;
         for _ in 0..30 {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            let response = self.rpc_call(rpc_url, "eth_getTransactionReceipt", json!([tx_hash])).await?;
+            let response = self
+                .rpc_call(rpc_url, "eth_getTransactionReceipt", json!([tx_hash]))
+                .await?;
             let Some(receipt) = response.get("result").filter(|v| !v.is_null()) else {
                 continue;
             };
@@ -723,10 +1055,18 @@ impl ContractService {
 
     /// Sign and send a backend-authorized transaction. Returns tx hash.
     async fn sign_and_send_tx(&self, to: Address, calldata: Vec<u8>) -> anyhow::Result<String> {
-        let rpc_url = self.rpc_url.as_ref().ok_or_else(|| anyhow::anyhow!("MANTLE_RPC_URL not configured"))?;
-        let private_key = self.private_key.as_ref().ok_or_else(|| anyhow::anyhow!("BACKEND_SIGNER_PRIVATE_KEY not configured"))?;
+        let rpc_url = self
+            .rpc_url
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("MANTLE_RPC_URL not configured"))?;
+        let private_key = self
+            .private_key
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("BACKEND_SIGNER_PRIVATE_KEY not configured"))?;
 
-        let wallet: LocalWallet = private_key.parse::<LocalWallet>()?.with_chain_id(self.chain_id);
+        let wallet: LocalWallet = private_key
+            .parse::<LocalWallet>()?
+            .with_chain_id(self.chain_id);
         let from = wallet.address();
 
         // Hold the lock for the entire sign+send cycle so concurrent calls
@@ -750,36 +1090,56 @@ impl ContractService {
         let rlp_bytes = typed.rlp_signed(&sig);
         let hex = format!("0x{}", hex_encode(&rlp_bytes));
 
-        let response = self.rpc_call(rpc_url, "eth_sendRawTransaction", json!([hex])).await?;
+        let response = self
+            .rpc_call(rpc_url, "eth_sendRawTransaction", json!([hex]))
+            .await?;
         if let Some(err) = response.get("error") {
             anyhow::bail!("rpc error sending tx: {err}");
         }
-        let tx_hash = response.get("result").and_then(Value::as_str)
+        let tx_hash = response
+            .get("result")
+            .and_then(Value::as_str)
             .ok_or_else(|| anyhow::anyhow!("eth_sendRawTransaction missing result"))?;
         Ok(tx_hash.to_string())
     }
 
     /// Poll for a receipt and extract the PredictionCreated event's predictionId.
     async fn wait_for_prediction_id(&self, tx_hash: &str) -> anyhow::Result<u64> {
-        let rpc_url = self.rpc_url.as_ref().ok_or_else(|| anyhow::anyhow!("no rpc"))?;
+        let rpc_url = self
+            .rpc_url
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no rpc"))?;
         // PredictionCreated(uint256 indexed predictionId, bytes32 dataKey, uint256 expiryTime)
         let event_sig = "PredictionCreated(uint256,bytes32,uint256)";
-        let topic0 = format!("0x{}", hex_encode(&ethers_core::utils::keccak256(event_sig.as_bytes())));
+        let topic0 = format!(
+            "0x{}",
+            hex_encode(&ethers_core::utils::keccak256(event_sig.as_bytes()))
+        );
 
         for _ in 0..30 {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            let response = self.rpc_call(rpc_url, "eth_getTransactionReceipt", json!([tx_hash])).await?;
+            let response = self
+                .rpc_call(rpc_url, "eth_getTransactionReceipt", json!([tx_hash]))
+                .await?;
             let Some(receipt) = response.get("result").filter(|v| !v.is_null()) else {
                 continue;
             };
             let empty_logs = vec![];
-            let logs = receipt.get("logs").and_then(Value::as_array).unwrap_or(&empty_logs);
+            let logs = receipt
+                .get("logs")
+                .and_then(Value::as_array)
+                .unwrap_or(&empty_logs);
             for log in logs {
                 let empty_topics = vec![];
-                let topics = log.get("topics").and_then(Value::as_array).unwrap_or(&empty_topics);
+                let topics = log
+                    .get("topics")
+                    .and_then(Value::as_array)
+                    .unwrap_or(&empty_topics);
                 if topics.first().and_then(Value::as_str) == Some(&topic0) {
                     if let Some(id_hex) = topics.get(1).and_then(Value::as_str) {
-                        let id_bytes = ethers_core::utils::hex::decode(id_hex.trim_start_matches("0x")).unwrap_or_default();
+                        let id_bytes =
+                            ethers_core::utils::hex::decode(id_hex.trim_start_matches("0x"))
+                                .unwrap_or_default();
                         let id_val = U256::from_big_endian(&id_bytes);
                         return Ok(id_val.min(U256::from(u64::MAX)).as_u64());
                     }
@@ -795,25 +1155,47 @@ impl ContractService {
     }
 
     async fn eth_call(&self, rpc_url: &str, to: &str, calldata: &[u8]) -> anyhow::Result<String> {
-        let response = self.rpc_call(rpc_url, "eth_call", json!([{
+        let response = self
+            .rpc_call(
+                rpc_url,
+                "eth_call",
+                json!([{
             "to": to,
             "data": format!("0x{}", hex_encode(calldata)),
-        }, "latest"])).await?;
+        }, "latest"]),
+            )
+            .await?;
         if let Some(err) = response.get("error") {
             anyhow::bail!("eth_call error: {err}");
         }
-        Ok(response.get("result").and_then(Value::as_str).unwrap_or("0x").to_string())
+        Ok(response
+            .get("result")
+            .and_then(Value::as_str)
+            .unwrap_or("0x")
+            .to_string())
     }
 
     async fn get_nonce(&self, rpc_url: &str, address: &str) -> anyhow::Result<U256> {
-        let response = self.rpc_call(rpc_url, "eth_getTransactionCount", json!([address, "pending"])).await?;
-        let hex = response.get("result").and_then(Value::as_str).unwrap_or("0x0");
+        let response = self
+            .rpc_call(
+                rpc_url,
+                "eth_getTransactionCount",
+                json!([address, "pending"]),
+            )
+            .await?;
+        let hex = response
+            .get("result")
+            .and_then(Value::as_str)
+            .unwrap_or("0x0");
         Ok(U256::from_str_radix(hex.trim_start_matches("0x"), 16)?)
     }
 
     async fn get_gas_price(&self, rpc_url: &str) -> anyhow::Result<U256> {
         let response = self.rpc_call(rpc_url, "eth_gasPrice", json!([])).await?;
-        let hex = response.get("result").and_then(Value::as_str).unwrap_or("0x3B9ACA00");
+        let hex = response
+            .get("result")
+            .and_then(Value::as_str)
+            .unwrap_or("0x3B9ACA00");
         Ok(U256::from_str_radix(hex.trim_start_matches("0x"), 16)?)
     }
 
@@ -837,9 +1219,51 @@ impl ContractService {
     }
 }
 
+/// A single priced on-chain holding.
+#[derive(Debug, Clone)]
+pub struct PortfolioHolding {
+    pub symbol: String,
+    pub amount: f64,
+    pub usd_value: f64,
+}
+
+/// A wallet's full on-chain portfolio with a USD total.
+#[derive(Debug, Clone)]
+pub struct PortfolioSnapshot {
+    pub total_usd: f64,
+    pub positions: Vec<PortfolioHolding>,
+}
+
+/// Map a token symbol to its USD price using the fetched price set. Stablecoins
+/// are pinned to $1; tokens without a known price resolve to 0.
+fn usd_price_for(symbol: &str, prices: &std::collections::HashMap<&'static str, f64>) -> f64 {
+    match symbol.to_uppercase().as_str() {
+        "USDC" | "USDT" | "USDY" => 1.0,
+        "MNT" | "WMNT" => prices.get("mantle").copied().unwrap_or(0.0),
+        "WETH" => prices.get("ethereum").copied().unwrap_or(0.0),
+        "METH" | "CMETH" => prices
+            .get("mantle-staked-ether")
+            .copied()
+            .or_else(|| prices.get("ethereum").copied())
+            .unwrap_or(0.0),
+        _ => 0.0,
+    }
+}
+
+/// Lossy U256 → f64 conversion for display amounts.
+fn u256_to_f64(value: U256) -> f64 {
+    if value <= U256::from(u128::MAX) {
+        value.as_u128() as f64
+    } else {
+        f64::MAX
+    }
+}
+
 fn u256_from_return_data(hex: &str) -> U256 {
     let bytes = ethers_core::utils::hex::decode(hex.trim_start_matches("0x")).unwrap_or_default();
-    if bytes.len() < 32 { return U256::zero(); }
+    if bytes.len() < 32 {
+        return U256::zero();
+    }
     U256::from_big_endian(&bytes[bytes.len() - 32..])
 }
 
@@ -847,17 +1271,23 @@ fn u256_from_return_data(hex: &str) -> U256 {
 /// `offset_slot` is the byte index of the 32-byte word that holds the
 /// offset to the string's length prefix (typically 32 for the second slot).
 fn decode_abi_string(data: &[u8], offset_slot: usize) -> Option<String> {
-    if data.len() < offset_slot + 32 { return None; }
+    if data.len() < offset_slot + 32 {
+        return None;
+    }
     // Read the offset value (points to where the length word lives)
     let offset = U256::from_big_endian(&data[offset_slot..offset_slot + 32])
         .min(U256::from(usize::MAX))
         .as_usize();
-    if data.len() < offset + 32 { return None; }
+    if data.len() < offset + 32 {
+        return None;
+    }
     let len = U256::from_big_endian(&data[offset..offset + 32])
         .min(U256::from(usize::MAX))
         .as_usize();
     let start = offset + 32;
-    if data.len() < start + len { return None; }
+    if data.len() < start + len {
+        return None;
+    }
     String::from_utf8(data[start..start + len].to_vec()).ok()
 }
 

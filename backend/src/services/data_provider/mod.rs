@@ -154,19 +154,34 @@ impl OnchainDataProvider for ProviderRegistry {
         &self,
         protocol: &str,
     ) -> Result<ProtocolMetrics, DataProviderError> {
+        let mut last_error = None;
         if let Some(nansen) = &self.nansen {
             match nansen.get_protocol_metrics(protocol).await {
                 Ok(metrics) => return Ok(metrics),
-                Err(err) => warn!("Nansen protocol metrics failed: {err}"),
+                Err(err) => {
+                    warn!("Nansen protocol metrics failed: {err}");
+                    last_error = Some(err);
+                }
             }
         }
         if let Some(defillama) = &self.defillama {
             match defillama.get_protocol_metrics(protocol).await {
                 Ok(metrics) => return Ok(metrics),
-                Err(err) => warn!("DefiLlama protocol metrics failed, using mock fallback: {err}"),
+                Err(err) => {
+                    warn!("DefiLlama protocol metrics failed: {err}");
+                    last_error = Some(err);
+                }
             }
         }
-        self.mock.get_protocol_metrics(protocol).await
+        // Protocol metrics drive arena prediction generation and resolution.
+        // When a real provider is configured, a fetch failure must surface as
+        // an error - settling predictions against mock values would move
+        // points based on fabricated data. Mock is only for dev environments
+        // with no provider configured at all.
+        match last_error {
+            Some(err) => Err(err),
+            None => self.mock.get_protocol_metrics(protocol).await,
+        }
     }
 
     async fn get_smart_money_movements(
@@ -248,7 +263,7 @@ impl NansenProvider {
     async fn smart_money_netflows(&self) -> Result<Vec<SmartMoneyMovement>, DataProviderError> {
         let payload = self
             .post_json(
-                "/smart-money/netflows",
+                "/smart-money/netflow",
                 json!({
                     "chains": self.smart_money_chains.clone(),
                     "pagination": {
@@ -270,7 +285,7 @@ impl NansenProvider {
     async fn token_screener(&self) -> Result<Vec<SmartMoneyMovement>, DataProviderError> {
         let payload = self
             .post_json(
-                "/tgm/token-screener",
+                "/token-screener",
                 json!({
                     "chains": self.smart_money_chains.clone(),
                     "timeframe": "24h",
@@ -279,7 +294,7 @@ impl NansenProvider {
                         "per_page": 25
                     },
                     "filters": {
-                        "only_smart_money": true
+                        "trader_type": "sm"
                     },
                     "order_by": [
                         {
@@ -324,6 +339,9 @@ impl NansenProvider {
         Ok(parse_tgm_flows(token, &payload))
     }
 
+    /// Smart-money holder summary via Nansen TGM holders. Not yet wired into
+    /// the signal engine; parser is covered by tests.
+    #[allow(dead_code)]
     async fn tgm_holder_summary(&self, token: &str) -> Result<TokenFlow, DataProviderError> {
         let token_address = self.token_address(token)?;
         let payload = self
@@ -666,6 +684,7 @@ fn token_screener_movement_from_value(value: &Value) -> Option<SmartMoneyMovemen
             &["holder_count"],
             &["holders_count"],
             &["smart_money_wallet_count"],
+            &["nof_traders"],
         ],
     )
     .unwrap_or(1.0);
@@ -751,86 +770,13 @@ fn token_flow_from_tgm_flow(token: &str, value: &Value) -> Option<TokenFlow> {
     })
 }
 
-fn smart_money_movement_from_value(value: &Value) -> Option<SmartMoneyMovement> {
-    let asset = first_string(
-        value,
-        &[
-            &["token_symbol"],
-            &["symbol"],
-            &["token", "symbol"],
-            &["asset_symbol"],
-            &["asset", "symbol"],
-            &["name"],
-            &["token_name"],
-        ],
-    )?;
-    let wallet = first_string(
-        value,
-        &[
-            &["wallet"],
-            &["wallet_address"],
-            &["address"],
-            &["entity"],
-            &["entity_name"],
-            &["smart_money_type"],
-            &["label"],
-        ],
-    )
-    .unwrap_or_else(|| "smart-money-cohort".to_string());
-    let protocol = first_string(
-        value,
-        &[
-            &["protocol"],
-            &["protocol_name"],
-            &["project"],
-            &["chain"],
-            &["token", "chain"],
-        ],
-    )
-    .unwrap_or_else(|| "Smart Money Holdings".to_string());
-    let usd_value = first_f64(
-        value,
-        &[
-            &["value_usd"],
-            &["usd_value"],
-            &["value"],
-            &["balance_usd"],
-            &["amount_usd"],
-            &["token", "value_usd"],
-        ],
-    )
-    .unwrap_or(0.0);
-    let holder_count = first_f64(
-        value,
-        &[
-            &["smart_money_wallet_count"],
-            &["wallet_count"],
-            &["holders"],
-            &["holder_count"],
-        ],
-    )
-    .unwrap_or(1.0);
-    let confidence = smart_money_confidence(usd_value, holder_count);
-
-    Some(SmartMoneyMovement {
-        wallet,
-        protocol,
-        asset,
-        source_provider: "nansen".to_string(),
-        direction: "holding".to_string(),
-        usd_value,
-        confidence,
-        captured_at: Utc::now(),
-    })
-}
-
 fn smart_money_netflow_from_value(value: &Value) -> Option<SmartMoneyMovement> {
     let asset = first_string(
         value,
         &[&["token_symbol"], &["symbol"], &["token_name"], &["name"]],
     )?;
-    let protocol = first_string(value, &[&["chain"], &["network"]])
-        .unwrap_or_else(|| "mantle".to_string());
+    let protocol =
+        first_string(value, &[&["chain"], &["network"]]).unwrap_or_else(|| "mantle".to_string());
     let net_flow = first_f64(
         value,
         &[
@@ -876,9 +822,17 @@ fn protocol_metrics_from_defillama(
     yields_payload: &Value,
     captured_at: DateTime<Utc>,
 ) -> Result<ProtocolMetrics, DataProviderError> {
+    // Several protocols are listed as multiple DefiLlama entries (e.g.
+    // "Merchant Moe Liquidity Book" and "Merchant Moe DEX"); pick the
+    // highest-TVL match so metrics track the protocol's main deployment.
     let protocol_row = candidate_rows(protocols_payload)
         .into_iter()
-        .find(|row| defillama_protocol_matches(protocol, row))
+        .filter(|row| defillama_protocol_matches(protocol, row))
+        .max_by(|a, b| {
+            let tvl_a = first_f64(a, &[&["tvl"]]).unwrap_or(0.0);
+            let tvl_b = first_f64(b, &[&["tvl"]]).unwrap_or(0.0);
+            tvl_a.total_cmp(&tvl_b)
+        })
         .ok_or_else(|| {
             DataProviderError::Unavailable(format!("DefiLlama protocol not found: {protocol}"))
         })?;
@@ -931,7 +885,13 @@ fn defillama_protocol_matches(requested: &str, row: &Value) -> bool {
     for path in [&["name"][..], &["slug"][..], &["displayName"][..]] {
         if let Some(value) = first_string(row, &[path]) {
             let normalized = normalize_protocol_name(&value);
-            if aliases.iter().any(|alias| normalized == *alias) {
+            // Prefix match so "Merchant Moe" finds "Merchant Moe Liquidity
+            // Book" and "Lendle" finds "Lendle Pooled Markets". Aliases
+            // shorter than 5 chars (e.g. "moe") require an exact match to
+            // avoid false positives.
+            if aliases.iter().any(|alias| {
+                normalized == *alias || (alias.len() >= 5 && normalized.starts_with(alias.as_str()))
+            }) {
                 return true;
             }
         }
@@ -1030,6 +990,7 @@ fn candidate_rows(payload: &Value) -> Vec<&Value> {
         "items",
         "rows",
         "positions",
+        "protocols",
     ] {
         if let Some(value) = payload.get(key) {
             let rows = candidate_rows(value);
@@ -1155,19 +1116,19 @@ pub struct MockProvider;
 #[async_trait]
 impl OnchainDataProvider for MockProvider {
     async fn get_wallet_profile(&self, address: &str) -> Result<WalletProfile, DataProviderError> {
+        // Honest empty profile. The mock is the no-provider fallback, so it
+        // must not fabricate portfolio value, age, protocols, or labels —
+        // those are filled from real on-chain reads by the caller when
+        // available, and left blank (not faked) when they aren't.
         Ok(WalletProfile {
             address: address.to_string(),
             network: "mantle".to_string(),
-            labels: vec!["yield-seeker".to_string(), "early-mantle-user".to_string()],
-            portfolio_value_usd: 8420.55,
-            wallet_age_days: 184,
-            transaction_count: 143,
-            protocols_used: vec![
-                "Agni Finance".to_string(),
-                "Merchant Moe".to_string(),
-                "mETH Protocol".to_string(),
-            ],
-            risk_score: 58,
+            labels: vec![],
+            portfolio_value_usd: 0.0,
+            wallet_age_days: 0,
+            transaction_count: 0,
+            protocols_used: vec![],
+            risk_score: 50,
         })
     }
 
@@ -1276,6 +1237,7 @@ mod tests {
             defillama_base_url: "https://api.llama.fi".to_string(),
             defillama_yields_base_url: "https://yields.llama.fi".to_string(),
             mantle_rpc_url: None,
+            mantle_data_rpc_url: None,
             mantle_chain_id: 5003,
             aa_provider_stack: "safe-4337-relay-kit".to_string(),
             aa_bundler_url: None,
@@ -1290,6 +1252,7 @@ mod tests {
             mantle_wmnt_address: None,
             mantle_weth_address: None,
             mantle_cmeth_address: None,
+            exec_token_addresses: Vec::new(),
             approved_strategy_address: None,
             approved_strategy_spender_address: None,
             strategy_deposit_function: "deposit(address,uint256)".to_string(),
@@ -1299,9 +1262,9 @@ mod tests {
             agni_strategy_address: None,
             agni_spender_address: None,
             agni_deposit_function: None,
-            fluxion_strategy_address: None,
-            fluxion_spender_address: None,
-            fluxion_deposit_function: None,
+            lendle_strategy_address: None,
+            lendle_spender_address: None,
+            lendle_deposit_function: None,
             meth_strategy_address: None,
             meth_spender_address: None,
             meth_deposit_function: None,
@@ -1312,6 +1275,8 @@ mod tests {
             prediction_registry_address: None,
             identity_sbt_address: None,
             intent_registry_address: None,
+            telegram_bot_token: None,
+            telegram_chat_id: None,
         }
     }
 
@@ -1325,14 +1290,30 @@ mod tests {
 
         assert_eq!(registry.active_name(), "nansen-or-mock-fallback");
         assert_eq!(profile.network, "mantle");
-        assert!(profile
-            .protocols_used
-            .contains(&"mETH Protocol".to_string()));
+        // The mock fallback is honest: it fabricates no portfolio value,
+        // protocols, or labels. Real values are filled from on-chain reads.
+        assert_eq!(profile.portfolio_value_usd, 0.0);
+        assert!(profile.protocols_used.is_empty());
+        assert!(profile.labels.is_empty());
     }
 
     #[tokio::test]
-    async fn registry_falls_back_when_nansen_protocol_metrics_are_unavailable() {
+    async fn registry_surfaces_protocol_metrics_error_when_real_provider_fails() {
+        // Protocol metrics settle arena predictions: when a real provider is
+        // configured but unavailable, the registry must error rather than
+        // silently serve mock values.
         let registry = ProviderRegistry::new(settings_with_nansen());
+        let result = registry.get_protocol_metrics("mETH Protocol").await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn registry_uses_mock_protocol_metrics_when_no_provider_configured() {
+        let mut settings = settings_with_nansen();
+        settings.nansen_api_key = None;
+        settings.defillama_enabled = false;
+        let registry = ProviderRegistry::new(settings);
         let metrics = registry
             .get_protocol_metrics("mETH Protocol")
             .await
@@ -1555,5 +1536,35 @@ mod tests {
         assert_eq!(metrics.protocol, "Mantle Staked Ether");
         assert_eq!(metrics.source_provider, "defillama");
         assert!(metrics.risk_score < 50);
+    }
+
+    #[test]
+    fn defillama_prefix_match_picks_highest_tvl_variant() {
+        // DefiLlama lists Merchant Moe as two entries; "Merchant Moe" must
+        // prefix-match and select the higher-TVL deployment.
+        let protocols = json!([
+            {
+                "name": "Merchant Moe DEX",
+                "slug": "merchant-moe-dex",
+                "tvl": 300000.0,
+                "change_1d": 0.4
+            },
+            {
+                "name": "Merchant Moe Liquidity Book",
+                "slug": "merchant-moe-liquidity-book",
+                "tvl": 21200000.0,
+                "change_1d": 1.1
+            }
+        ]);
+        let metrics = protocol_metrics_from_defillama(
+            "Merchant Moe",
+            &protocols,
+            &json!({ "data": [] }),
+            chrono::Utc::now(),
+        )
+        .unwrap();
+
+        assert_eq!(metrics.protocol, "Merchant Moe Liquidity Book");
+        assert_eq!(metrics.tvl_usd, 21200000.0);
     }
 }

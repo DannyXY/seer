@@ -7,11 +7,52 @@ use tracing::info;
 
 use crate::{
     db::{
-        persist_agent_execution_log, persist_agent_execution_policy, persist_job_run,
-        persist_signals, JobRunRecord, JobRunStatus,
+        load_user_settings, persist_agent_execution_log, persist_agent_execution_policy,
+        persist_job_run, persist_signals, JobRunRecord, JobRunStatus,
     },
+    models::{agent::AgentIntent, execution::ExecutionProposal},
     AppState,
 };
+
+/// Whether the wallet has Telegram alerts enabled. Persisted settings win;
+/// without a database row, fall back to the in-memory store (defaults to on).
+pub(crate) async fn telegram_alerts_enabled(state: &AppState, wallet_address: &str) -> bool {
+    match load_user_settings(state.services.infra.postgres.as_ref(), wallet_address).await {
+        Ok(Some(settings)) => settings.telegram_alerts,
+        Ok(None) => state.services.settings.get(wallet_address).telegram_alerts,
+        Err(err) => {
+            tracing::warn!(
+                wallet_address,
+                error = %err,
+                "failed to load user settings for alert gating"
+            );
+            state.services.settings.get(wallet_address).telegram_alerts
+        }
+    }
+}
+
+async fn notify_intent_actionable(
+    state: &AppState,
+    intent: &AgentIntent,
+    proposal: &ExecutionProposal,
+) {
+    if !state.services.notifier.is_configured()
+        || !telegram_alerts_enabled(state, &intent.wallet_address).await
+    {
+        return;
+    }
+    let text = format!(
+        "Seer: intent \"{}\" is actionable ({}) for wallet {}.",
+        intent.raw_intent, proposal.action, intent.wallet_address
+    );
+    if let Err(err) = state.services.notifier.send_message(&text).await {
+        tracing::warn!(
+            intent_id = %intent.id,
+            error = %err,
+            "failed to send telegram alert for actionable intent"
+        );
+    }
+}
 
 pub fn spawn_internal_jobs(state: AppState) {
     tokio::spawn(async move {
@@ -29,10 +70,10 @@ pub async fn run_worker(state: AppState) -> anyhow::Result<()> {
 }
 
 async fn run_scheduler(state: AppState) {
-    let mut fast_tick = interval(std::time::Duration::from_secs(3_600));   // 1 hour
-    let mut arena_tick = interval(std::time::Duration::from_secs(3_600));   // 1 hour
+    let mut fast_tick = interval(std::time::Duration::from_secs(3_600)); // 1 hour
+    let mut arena_tick = interval(std::time::Duration::from_secs(3_600)); // 1 hour
     let mut prediction_tick = interval(std::time::Duration::from_secs(7_200)); // 2 hours
-    let mut cohort_tick = interval(std::time::Duration::from_secs(14_400));  // 4 hours
+    let mut cohort_tick = interval(std::time::Duration::from_secs(14_400)); // 4 hours
 
     fast_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     arena_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -85,6 +126,7 @@ async fn run_fast_jobs(state: &AppState) {
             Ok(proposal) => {
                 if proposal.actionable {
                     actionable_intents += 1;
+                    notify_intent_actionable(state, &intent, &proposal).await;
                 }
                 if let Some(policy) = state
                     .services
@@ -372,6 +414,7 @@ mod tests {
             defillama_base_url: "https://api.llama.fi".to_string(),
             defillama_yields_base_url: "https://yields.llama.fi".to_string(),
             mantle_rpc_url: None,
+            mantle_data_rpc_url: None,
             mantle_chain_id: 5003,
             aa_provider_stack: "safe-4337-relay-kit".to_string(),
             aa_bundler_url: None,
@@ -386,6 +429,7 @@ mod tests {
             mantle_wmnt_address: None,
             mantle_weth_address: None,
             mantle_cmeth_address: None,
+            exec_token_addresses: Vec::new(),
             approved_strategy_address: None,
             approved_strategy_spender_address: None,
             strategy_deposit_function: "deposit(address,uint256)".to_string(),
@@ -395,9 +439,9 @@ mod tests {
             agni_strategy_address: None,
             agni_spender_address: None,
             agni_deposit_function: None,
-            fluxion_strategy_address: None,
-            fluxion_spender_address: None,
-            fluxion_deposit_function: None,
+            lendle_strategy_address: None,
+            lendle_spender_address: None,
+            lendle_deposit_function: None,
             meth_strategy_address: Some("0x0000000000000000000000000000000000000002".to_string()),
             meth_spender_address: None,
             meth_deposit_function: None,
@@ -408,6 +452,8 @@ mod tests {
             prediction_registry_address: None,
             identity_sbt_address: None,
             intent_registry_address: None,
+            telegram_bot_token: None,
+            telegram_chat_id: None,
         }
     }
 

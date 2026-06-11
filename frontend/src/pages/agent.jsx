@@ -39,13 +39,25 @@ function TypingMessage() {
 
 /* ---------- the confirm-agent card (Magic-Newton style) ---------- */
 const TOKEN_GLYPH = { USDY: "$", mETH: "Ξ", MNT: "M", USDC: "$", Guardrail: "◈", Mirror: "◎" };
-function ConfirmAgentCard({ card, onContinue, onEdit, onCancel, done }) {
+function capabilityClass(tone) {
+  if (tone === "ready") return " ready";
+  if (tone === "danger") return " danger";
+  return "";
+}
+
+export function ConfirmAgentCard({ card, onContinue, onEdit, onCancel, done, actionDone }) {
   const cs = CAT_STYLE[card.accent] || CAT_STYLE.ALPHA;
+  const capability = card.capability || {
+    label: "Simulation only",
+    tone: "warn",
+    canExecute: false,
+    body: "Seer can anchor and monitor this intent, but no executable calldata is available.",
+  };
   return (
     <div className={"seer-confirm" + (done ? " done" : "")}>
       <div className="seer-confirm-top">
         <span className="seer-confirm-bar" style={{ background: cs.c }} />
-        <span className="eyebrow" style={{ color: "var(--ink-2)" }}>{done ? "Agent deployed" : "Review & confirm"}</span>
+        <span className="eyebrow" style={{ color: "var(--ink-2)" }}>{done ? "Intent anchored" : "Review capability"}</span>
       </div>
       <div className="seer-confirm-title serif">{card.title}</div>
       <div className="seer-confirm-rows">
@@ -67,16 +79,21 @@ function ConfirmAgentCard({ card, onContinue, onEdit, onCancel, done }) {
         </div>
       </div>
       <div className="seer-simulation-banner">
-        <span className="seer-simulation-badge">Simulation</span>
-        <span>Seer will plan and track this intent - but live execution isn't active yet. Intent hash is anchored on-chain via SeerIntentRegistry.</span>
+        <span className={"seer-simulation-badge" + capabilityClass(capability.tone)}>{capability.label}</span>
+        <span>{capability.body}</span>
       </div>
+      {actionDone && (
+        <div className="seer-confirm-done"><Icon name="check" size={15} style={{ color: "var(--c-opp)" }} />Testnet transaction submitted</div>
+      )}
       {done ? (
-        <div className="seer-confirm-done"><Icon name="check" size={15} style={{ color: "var(--c-opp)" }} />Deployed and running</div>
+        <div className="seer-confirm-done"><Icon name="check" size={15} style={{ color: "var(--c-opp)" }} />Anchored for tracking</div>
       ) : (
         <div className="seer-confirm-actions">
           <button className="btn btn-ghost" style={{ justifyContent: "center" }} onClick={onCancel}>Cancel</button>
           <button className="btn btn-ghost" style={{ flex: 1, justifyContent: "center" }} onClick={onEdit}>Edit</button>
-          <button className="btn btn-primary" style={{ flex: 2, justifyContent: "center" }} onClick={onContinue}>Deploy agent<Icon name="arrow" size={15} /></button>
+          <button className="btn btn-primary" style={{ flex: 2, justifyContent: "center" }} onClick={onContinue}>
+            {capability.canExecute ? "Sign & deploy" : "Anchor intent"}<Icon name="arrow" size={15} />
+          </button>
         </div>
       )}
     </div>

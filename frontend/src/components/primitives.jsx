@@ -134,13 +134,13 @@ function RiskGauge({ score, size = 132 }) {
   const color = v < 40 ? "var(--safe)" : v < 70 ? "var(--warn)" : "var(--danger)";
   const label = v < 40 ? "Healthy" : v < 70 ? "Caution" : "Elevated";
   return (
-    <div style={{ width: size, height: size * 0.78, position: "relative" }}>
-      <svg width={size} height={size * 0.9} style={{ overflow: "visible" }}>
+    <div style={{ width: size, height: size, position: "relative" }}>
+      <svg width={size} height={size} style={{ overflow: "visible" }}>
         <path d={arc(a0, a1)} stroke="var(--track)" strokeWidth="9" fill="none" strokeLinecap="round" />
         <path d={arc(a0, aEnd)} stroke={color} strokeWidth="9" fill="none" strokeLinecap="round"
               style={{ transition: "stroke 0.6s var(--ease), d 0.8s var(--ease)" }} />
       </svg>
-      <div style={{ position: "absolute", inset: 0, top: 6, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
         <span className="num" style={{ fontSize: 34, fontWeight: 600, color: "var(--ink)", lineHeight: 1 }}>
           <CountUp to={score} dur={900} />
         </span>

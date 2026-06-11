@@ -4,13 +4,12 @@ use axum::{
     Json,
 };
 use serde_json::json;
-use uuid::Uuid;
 
 use crate::{
     api::auth_guard::require_wallet,
     db::persist_lp_position,
     errors::ApiError,
-    models::lp_position::{AgniPosition, LpPosition, MerchantMoePosition, ProtocolType},
+    models::lp_position::{AgniPosition, LpPosition, MerchantMoePosition},
     AppState,
 };
 
@@ -129,9 +128,10 @@ pub async fn list_user_positions(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_wallet(&state, &headers, &wallet_address)?;
 
-    let positions = crate::db::get_lp_positions(state.services.infra.postgres.as_ref(), &wallet_address)
-        .await
-        .map_err(|err| ApiError::Service(err.to_string()))?;
+    let positions =
+        crate::db::get_lp_positions(state.services.infra.postgres.as_ref(), &wallet_address)
+            .await
+            .map_err(|err| ApiError::Service(err.to_string()))?;
 
     Ok(Json(json!({
         "wallet_address": wallet_address,

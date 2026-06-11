@@ -381,7 +381,7 @@ export default function Landing({ onEnter, isAuthenticated }) {
 
         <footer className="sl-foot">
           <div className="sl-brand"><PrismMark size={22} /><span className="wm" style={{ fontSize: 16 }}>SEER</span></div>
-          <div className="row gap-24"><a>GitHub</a><a>X / Twitter</a><a>Telegram</a></div>
+          <div className="row gap-24"><a>GitHub</a><a href="https://x.com/theseeragent" target="_blank" rel="noopener noreferrer">X / Twitter</a><a>Telegram</a></div>
           <span className="pill"><span className="dot" style={{ background: "var(--c-opp)" }} />Mantle Network</span>
         </footer>
       </div>
