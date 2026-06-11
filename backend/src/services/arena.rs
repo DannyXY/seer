@@ -352,12 +352,9 @@ impl ArenaService {
         }
     }
 
+    /// Seer's own track record: every resolved prediction counts, whether or
+    /// not any user entered it. Void/cancelled outcomes are excluded.
     pub fn seer_record(&self) -> (u32, u32) {
-        let entries_snap = self
-            .entries
-            .read()
-            .expect("arena entry store poisoned")
-            .clone();
         let predictions_snap = self
             .predictions
             .read()
@@ -367,22 +364,19 @@ impl ArenaService {
         let mut total = 0u32;
         let mut correct = 0u32;
 
-        for entry in entries_snap.values() {
-            if !matches!(entry.status, ArenaEntryStatus::Resolved) {
+        for prediction in predictions_snap.values() {
+            if !matches!(prediction.status, PredictionStatus::Resolved) {
                 continue;
             }
-            let Some(prediction) = predictions_snap.get(&entry.prediction_id) else {
-                continue;
-            };
-            let seer_correct = prediction
-                .result
-                .as_deref()
-                .map(|r| r == "SeerCorrect")
-                .unwrap_or(false);
-
-            total += 1;
-            if seer_correct {
-                correct += 1;
+            match prediction.result.as_deref() {
+                Some("SeerCorrect") => {
+                    total += 1;
+                    correct += 1;
+                }
+                Some("SeerIncorrect") => {
+                    total += 1;
+                }
+                _ => {}
             }
         }
 

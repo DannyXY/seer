@@ -4,14 +4,18 @@ Seer is a wallet intelligence and prediction system for the Mantle Turing Test H
 
 ## Deployed Contracts (Mantle Sepolia Testnet)
 
+These are the addresses the live deployment reads and writes (also served by `GET /api/contracts/addresses` so frontend explorer links always match the backend configuration):
+
 | Contract               | Address                                      |
 | ---------------------- | -------------------------------------------- |
-| SeerArenaPoints        | `0x2B8cCC79007a66053eA081786A886174CD548eEd` |
-| SeerPredictionRegistry | `0x1E255E1C5A18d79F4ee1FF7a5BC9dB7e542e68e8` |
-| SeerIdentitySBT        | `0x1B46bb805a6707449B27C95175D0a2ff07Cb6BA2` |
-| SeerIntentRegistry     | `0x71cE98dA05B66a19c1894d8d2ea0b81600D461D9` |
+| SeerArenaPoints        | `0xC51E0DdF42F5aDf2bbBB9aB67Cd490f35D70F31d` |
+| SeerPredictionRegistry | `0x920Ce8b0e5A5a5C93EfcDe3dbe886a8B84EDdFB8` |
+| SeerIdentitySBT        | `0xBb0f5d7191F6d9884AB20AbF8a26294c7767cF63` |
+| SeerIntentRegistry     | `0x2D99010E92b1EFf33C0A1Bc139FA85018EA3c483` |
+| SeerTestToken (USDC)   | `0x984C7bA2f692F8c19d95E635cA39201EF01F74B2` |
+| SeerTestStrategy       | `0xD9db691607318B2076ffFE16a29E8753Aa7cD11d` |
 
-All four contracts are verified on [Mantle Sepolia Explorer](https://explorer.sepolia.mantle.xyz).
+All contracts are verified on [Mantle Sepolia Explorer](https://explorer.sepolia.mantle.xyz).
 
 Frontend URL: https://seer-frontend.onrender.com/
 Backend URL: https://seer-api-7mlt.onrender.com
@@ -90,6 +94,26 @@ provider/RPC facts -> backend rules and scoring -> Claude JSON explanation -> ba
 
 Set `CLAUDE_API_KEY` to use the live Anthropic Messages API. If the key is absent or Claude fails, Seer returns deterministic fallback copy so signals, intents, and demos keep working.
 
+## Data Provenance
+
+Every signal carries a `source_provider` field (`nansen`, `defillama`, or `mock`). When a live provider is unavailable (rate limit, missing key, exhausted credits) the deterministic fallback takes over and the frontend labels those signals **Simulated** - live data and sample data are never visually confused. Arena predictions are resolved against DeFiLlama TVL metrics only; if live metrics are unavailable the resolution job blocks rather than settling points against fabricated values.
+
+## Telegram Alerts
+
+The worker pushes Telegram alerts at the two moments users actually care about:
+
+- **Intent actionable** - the fast job loop detects an active intent's trigger conditions passed and an execution proposal is ready.
+- **Prediction resolved** - an Arena prediction settles, with the outcome and the user's points delta, e.g. `Seer Arena: "mETH Protocol TVL will stay above $40M for the next 24 hours" resolved (SeerCorrect). Points change for 0x...: +120.`
+
+Alerts are gated per-user by the `telegram_alerts` setting (Settings screen in the app). Configure with:
+
+```env
+TELEGRAM_BOT_TOKEN=   # from @BotFather
+TELEGRAM_CHAT_ID=     # destination chat/channel id
+```
+
+When either variable is unset the notifier is a silent no-op, so local runs need no Telegram setup.
+
 ## Local Run
 
 ```bash
@@ -145,6 +169,7 @@ POST /api/agent/policy/:policy_id/revoke
 POST /api/agent/intent/:intent_id/pause
 POST /api/agent/intent/:intent_id/stop
 
+GET  /api/contracts/addresses
 GET  /api/contracts/readiness
 GET  /api/contracts/execution-readiness
 POST /api/contracts/send-raw-transaction

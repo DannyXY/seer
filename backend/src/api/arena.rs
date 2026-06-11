@@ -226,6 +226,13 @@ pub async fn leaderboard(State(state): State<AppState>) -> Json<Value> {
 }
 
 pub async fn seer_record(State(state): State<AppState>) -> Json<Value> {
+    // Merge from DB first - predictions are resolved by the worker process, so
+    // the API's in-memory store may not have seen the resolution yet.
+    if let Ok(db_preds) = load_arena_predictions(state.services.infra.postgres.as_ref()).await {
+        if !db_preds.is_empty() {
+            state.services.arena.seed_predictions(db_preds);
+        }
+    }
     let (total, correct) = state.services.arena.seer_record();
     let accuracy_rate = if total > 0 {
         correct as f64 / total as f64

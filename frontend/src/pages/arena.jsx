@@ -19,7 +19,22 @@ function Odds({ conf }) {
   );
 }
 
-function PredictionCard({ p, onBet, tick }) {
+function OnChainLink({ contracts, onchainId, label }) {
+  if (!onchainId || !contracts?.prediction_registry) return null;
+  return (
+    <a
+      className="row gap-5 mono"
+      style={{ fontSize: 11, color: "var(--ink-2)", textDecoration: "none" }}
+      href={`${contracts.explorer_base}/address/${contracts.prediction_registry}`}
+      target="_blank" rel="noopener noreferrer"
+      title="SeerPredictionRegistry on Mantle Sepolia Explorer - prediction, entries, and settlement are all on-chain"
+    >
+      <Icon name="shield" size={11} />{label || `On-chain #${onchainId} · verify`}<Icon name="arrow-up-right" size={10} />
+    </a>
+  );
+}
+
+function PredictionCard({ p, onBet, contracts }) {
   const hot = p.pool > 4000 || p.hot;
   const hiConf = p.conf >= 65;
   return (
@@ -36,9 +51,12 @@ function PredictionCard({ p, onBet, tick }) {
 
       <Odds conf={p.conf} />
 
-      <div className="row" style={{ justifyContent: "space-between", marginTop: 14, marginBottom: 14 }}>
+      <div className="row" style={{ justifyContent: "space-between", marginTop: 14, marginBottom: 14, flexWrap: "wrap", rowGap: 6 }}>
         <span className="faint mono" style={{ fontSize: 11.5, whiteSpace: "nowrap" }}>Prize pool</span>
-        <span className="num" style={{ fontSize: 13, fontWeight: 500, whiteSpace: "nowrap" }}><CountUp to={p.pool} dur={900} /> pts</span>
+        <span className="row gap-10" style={{ flexWrap: "wrap", rowGap: 6 }}>
+          <OnChainLink contracts={contracts} onchainId={p.onchainId} />
+          <span className="num" style={{ fontSize: 13, fontWeight: 500, whiteSpace: "nowrap" }}><CountUp to={p.pool} dur={900} /> pts</span>
+        </span>
       </div>
 
       <div className="seer-bet-btns">
@@ -48,6 +66,32 @@ function PredictionCard({ p, onBet, tick }) {
         <button className="seer-bet-against" onClick={() => onBet(p, "AGAINST")}>
           <Icon name="x" size={13} />Bet against
         </button>
+      </div>
+    </article>
+  );
+}
+
+function ResolvedCard({ p, contracts }) {
+  const correct = p.result === "SeerCorrect";
+  const c = correct ? "var(--c-opp)" : "var(--danger)";
+  const bg = correct ? "var(--c-opp-wash)" : "var(--c-alpha-wash)";
+  return (
+    <article className="seer-pred" style={{ opacity: 0.92 }}>
+      <div className="row gap-8" style={{ marginBottom: 10, flexWrap: "wrap" }}>
+        <span className="badge" style={{ color: c, background: bg }}>
+          <Icon name={correct ? "check" : "x"} size={11} />{correct ? "Seer was right" : "Seer was wrong"}
+        </span>
+        <span className="grow" />
+        <OnChainLink contracts={contracts} onchainId={p.onchainId} label={`Settled on-chain #${p.onchainId} · verify`} />
+      </div>
+      <h3 className="seer-pred-claim" style={{ fontSize: 15 }}>{p.claim}</h3>
+      <div className="row gap-12" style={{ marginTop: 8, flexWrap: "wrap", rowGap: 4 }}>
+        <span className="faint mono" style={{ fontSize: 11.5 }}>Called at {p.conf}% confidence</span>
+        {p.finalValue != null && (
+          <span className="faint mono" style={{ fontSize: 11.5 }}>
+            Final value: {new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(Number(p.finalValue))}
+          </span>
+        )}
       </div>
     </article>
   );
@@ -146,6 +190,9 @@ export function ArenaScreen({ showToast }) {
   }, [seer.wallet]);
 
   const rec = seer.SEER_RECORD;
+  const contracts = seer.CONTRACTS;
+  const openPreds = seer.PREDICTIONS.filter((p) => p.status !== "Resolved" && p.status !== "Cancelled");
+  const resolvedPreds = seer.PREDICTIONS.filter((p) => p.status === "Resolved");
 
   const claimStarterPoints = async () => {
     if (!onchain?.claim_starter_calldata) return;
@@ -225,13 +272,24 @@ export function ArenaScreen({ showToast }) {
         <section className="col gap-16">
           <div className="row" style={{ justifyContent: "space-between" }}>
             <span className="eyebrow" style={{ whiteSpace: "nowrap" }}>Open predictions</span>
-            <span className="faint num" style={{ fontSize: 12, whiteSpace: "nowrap" }}>{seer.PREDICTIONS.length} live</span>
+            <span className="faint num" style={{ fontSize: 12, whiteSpace: "nowrap" }}>{openPreds.length} live</span>
           </div>
           <div className="seer-pred-list">
-            {seer.PREDICTIONS.length === 0 ? (
+            {openPreds.length === 0 ? (
               <EmptyState icon="arena" title="No open predictions." body="The backend has not published an Arena prediction yet." />
-            ) : seer.PREDICTIONS.map((p) => <PredictionCard key={p.id} p={p} onBet={(pp, s) => setBetting({ pred: pp, side: s })} />)}
+            ) : openPreds.map((p) => <PredictionCard key={p.id} p={p} contracts={contracts} onBet={(pp, s) => setBetting({ pred: pp, side: s })} />)}
           </div>
+          {resolvedPreds.length > 0 && (
+            <>
+              <div className="row" style={{ justifyContent: "space-between", marginTop: 6 }}>
+                <span className="eyebrow" style={{ whiteSpace: "nowrap" }}>Recently resolved</span>
+                <span className="faint num" style={{ fontSize: 12, whiteSpace: "nowrap" }}>{resolvedPreds.length} settled on-chain</span>
+              </div>
+              <div className="seer-pred-list">
+                {resolvedPreds.map((p) => <ResolvedCard key={p.id} p={p} contracts={contracts} />)}
+              </div>
+            </>
+          )}
         </section>
 
         {/* side: record + tabs */}
@@ -248,6 +306,16 @@ export function ArenaScreen({ showToast }) {
                 <span key={i} className="seer-record-tick" style={{ background: i < rec.correct ? "var(--c-opp)" : "var(--line)" }} />
               ))}
             </div>
+            {contracts?.prediction_registry && (
+              <a
+                className="row gap-5 mono"
+                style={{ fontSize: 11, color: "var(--ink-2)", textDecoration: "none", marginTop: 10 }}
+                href={`${contracts.explorer_base}/address/${contracts.prediction_registry}`}
+                target="_blank" rel="noopener noreferrer"
+              >
+                <Icon name="shield" size={11} />Every prediction & settlement is verifiable on-chain<Icon name="arrow-up-right" size={10} />
+              </a>
+            )}
           </div>
 
           <div className="card" style={{ padding: 4 }}>

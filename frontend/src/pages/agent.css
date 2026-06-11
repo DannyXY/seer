@@ -33,19 +33,25 @@
   display: grid; grid-template-columns: 1fr 340px;
   height: 100%; min-height: 0;
 }
-/* Tablet: hide the rail, stack to a single full-width column.
-   Use flex (not a 1-col grid) so no empty 340px track can linger. */
+/* Tablet & mobile: stack to a single column with the page scrolling
+   naturally - the chat first, then the agents/approvals rail below it, so no
+   data is lost on small screens. The composer stays pinned to the viewport
+   bottom while the chat is in view. */
 @media (max-width: 1080px) {
-  .seer-agent-shell { display: flex; flex-direction: column; }
-  .seer-agent-shell > .seer-chat { flex: 1; min-height: 0; }
-}
-/* Mobile: let the screen scroll normally; pin the composer above the bottom nav. */
-@media (max-width: 720px) {
   .seer-main.agent-mode { display: block; overflow-y: auto; }
-  .seer-agent-shell { height: auto; min-height: 100%; }
+  .seer-agent-shell {
+    display: flex; flex-direction: column;
+    height: auto; min-height: 100%;
+  }
+  .seer-agent-shell > .seer-chat { flex: none; min-height: 72vh; }
   .seer-chat-scroll { overflow: visible; }
   .seer-chat-head { position: sticky; top: 0; }
   .seer-composer { position: sticky; bottom: 0; background: var(--paper); z-index: 6; }
+  .seer-intents-rail {
+    border-left: none; border-top: 1px solid var(--line);
+    overflow: visible; flex: none;
+    padding: 22px clamp(20px, 4vw, 40px) 30px;
+  }
 }
 
 /* ---- chat column ---- */
@@ -195,7 +201,11 @@
 }
 .seer-rail-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .seer-rail-header .serif { white-space: nowrap; }
-@media (max-width: 1080px) { .seer-intents-rail { display: none; } }
+/* Mobile: the app shell is block-flow with a fixed bottom nav, so give the
+   chat an explicit viewport-based minimum instead of a percentage. */
+@media (max-width: 720px) {
+  .seer-agent-shell > .seer-chat { min-height: calc(100vh - 140px); }
+}
 .seer-approvals-panel {
   background: var(--card); border: 1px solid var(--line); border-radius: var(--r-md);
   padding: 14px; margin: 4px 0 10px;

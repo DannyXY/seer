@@ -48,6 +48,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/arena/leaderboard", get(arena::leaderboard))
         .route("/api/arena/seer-record", get(arena::seer_record))
         .route("/api/arena/resolve-due", post(arena::resolve_due))
+        .route("/api/contracts/addresses", get(contracts::addresses))
         .route("/api/contracts/readiness", get(contracts::readiness))
         .route(
             "/api/contracts/execution-readiness",

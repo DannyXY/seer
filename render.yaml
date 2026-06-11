@@ -16,8 +16,6 @@ services:
         sync: false
       - key: VITE_PRIVY_APP_ID
         value: cmq471x3900dv0bl7l3h6qwvw
-      - key: VITE_PIMLICO_API_KEY
-        sync: false
 
   - type: web
     name: seer-api
@@ -74,11 +72,11 @@ services:
       - key: MANTLE_METH_ADDRESS
         sync: false
       - key: SEER_EXEC_TOKEN_ADDRESSES
-        sync: false
+        value: USDC:0x984C7bA2f692F8c19d95E635cA39201EF01F74B2
       - key: SEER_APPROVED_STRATEGY_ADDRESS
-        sync: false
+        value: 0xD9db691607318B2076ffFE16a29E8753Aa7cD11d
       - key: SEER_APPROVED_STRATEGY_SPENDER_ADDRESS
-        sync: false
+        value: 0xD9db691607318B2076ffFE16a29E8753Aa7cD11d
       - key: SEER_STRATEGY_DEPOSIT_FUNCTION
         value: deposit(address,uint256)
       - key: SEER_MERCHANT_MOE_STRATEGY_ADDRESS
@@ -165,11 +163,11 @@ services:
       - key: MANTLE_METH_ADDRESS
         sync: false
       - key: SEER_EXEC_TOKEN_ADDRESSES
-        sync: false
+        value: USDC:0x984C7bA2f692F8c19d95E635cA39201EF01F74B2
       - key: SEER_APPROVED_STRATEGY_ADDRESS
-        sync: false
+        value: 0xD9db691607318B2076ffFE16a29E8753Aa7cD11d
       - key: SEER_APPROVED_STRATEGY_SPENDER_ADDRESS
-        sync: false
+        value: 0xD9db691607318B2076ffFE16a29E8753Aa7cD11d
       - key: SEER_STRATEGY_DEPOSIT_FUNCTION
         value: deposit(address,uint256)
       - key: SEER_MERCHANT_MOE_STRATEGY_ADDRESS

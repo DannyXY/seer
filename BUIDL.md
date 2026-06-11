@@ -23,26 +23,45 @@ Active intents don't just sit idle. A background worker runs a fast job loop tha
 
 ## Mantle-native contracts (deployed & verified on Mantle Sepolia)
 
-- `SeerArenaPoints`: point staking and settlement for the prediction arena
-- `SeerPredictionRegistry`: on-chain prediction entry and resolution
-- `SeerIdentitySBT`: non-transferable soul-bound identity token anchored to wallet reputation
-- `SeerIntentRegistry`: on-chain anchoring of intent hashes and execution policy hashes
+| Contract | Address | Role |
+| --- | --- | --- |
+| `SeerArenaPoints` | `0xC51E0DdF42F5aDf2bbBB9aB67Cd490f35D70F31d` | Point staking and settlement for the prediction arena |
+| `SeerPredictionRegistry` | `0x920Ce8b0e5A5a5C93EfcDe3dbe886a8B84EDdFB8` | On-chain prediction entry and resolution |
+| `SeerIdentitySBT` | `0xBb0f5d7191F6d9884AB20AbF8a26294c7767cF63` | Non-transferable soul-bound identity token anchored to wallet reputation |
+| `SeerIntentRegistry` | `0x2D99010E92b1EFf33C0A1Bc139FA85018EA3c483` | On-chain anchoring of intent hashes and execution policy hashes |
+| `SeerTestToken` (USDC) | `0x984C7bA2f692F8c19d95E635cA39201EF01F74B2` | Faucet-mintable test USDC used by the execution pipeline |
+| `SeerTestStrategy` | `0xD9db691607318B2076ffFE16a29E8753Aa7cD11d` | Approved strategy implementing `deposit(address,uint256)` for end-to-end approve-deposit execution |
+
+Everything Seer claims is checkable: every Arena prediction, entry, and settlement lives in `SeerPredictionRegistry`, every agent intent hash is anchored in `SeerIntentRegistry`, and the UI links each prediction card and anchored intent straight to the Mantle Sepolia Explorer. Seer's track record is not a screenshot - it is an on-chain ledger anyone can audit.
 
 ## Architecture highlights
 
-- **Rust/Axum backend** with a provider abstraction over Nansen and DeFiLlama (with deterministic fallback so demos never break)
+- **Rust/Axum backend** with a provider abstraction over Nansen and DeFiLlama. When a live provider is unavailable the deterministic fallback takes over and the UI labels those signals "Simulated" - live data and sample data are never visually confused
 - **Four trigger modes**: Instant, Recurring, Conditional, RecurringConditional
-- **ERC-4337 smart account path** for recurring/delegated execution via scoped session policies - spend limits, allowed assets, allowed protocols, expiry, and revocation are all enforced before any user operation is relayed
+- **ERC-4337 user-operation relay** (Safe 4337 stack) on the backend - bundler, entry point, and paymaster are configured on the live deployment, with scoped session policies (spend limits, allowed assets, allowed protocols, expiry, revocation) enforced before any user operation is relayed
 - **Claude as an explanation boundary**, not a source of financial facts - all signals come from RPC and provider data; Claude adds structured reasoning on top
 - **PostgreSQL-backed durable state** for signals, intents, execution logs, and job runs - fully in-memory for local demos
 - **Wallet auth** via EIP-191 challenge-sign-verify before any protected action
+- **Telegram alerts**: the worker pushes a Telegram message the moment an intent becomes actionable or an Arena prediction resolves, gated per-user by their alert settings
 
 ## Frontend
 
-React/TypeScript with Privy wallet integration, live arena leaderboard, agent intent management, and real-time toast notifications linked to Mantle Sepolia Explorer transactions.
+React/TypeScript with Privy wallet integration (email, social, or wallet login - a Mantle wallet is created automatically for Web2 users), live arena leaderboard, agent intent management, on-chain verification links on every prediction and anchored intent, and real-time toast notifications linked to Mantle Sepolia Explorer transactions.
+
+## Business model & go-to-market
+
+Seer's revenue model follows the product's three surfaces:
+
+1. **Premium signals (B2C subscription).** The free tier carries delayed, lower-confidence signals; a paid tier unlocks real-time smart-money signals, custom alert thresholds, and Telegram/Discord delivery. Comparable on-chain intelligence products (Nansen, Arkham) have validated willingness-to-pay in this segment - Seer differentiates by being Mantle-native and by pairing every signal with a one-click executable action.
+2. **Arena rake (protocol revenue).** Each settled prediction pool carries a small settlement fee. Because staking, resolution, and settlement are already on-chain in `SeerArenaPoints` / `SeerPredictionRegistry`, fee capture is a parameter change, not a redesign. The Arena also compounds into the moat: every resolved prediction grows a public, on-chain, auditable accuracy record that competitors cannot fake.
+3. **Signal API (B2B).** The same `/api/signals` engine that powers the feed can be sold as a feed for Mantle protocols, market makers, and funds that want Mantle-native flow intelligence - the output judges see in the UI is already a structured, consumable API.
+
+**Go-to-market:** launch on Mantle where the data pipeline and contracts already live, seed the Arena with Seer's own staked predictions (the AI's public track record is the acquisition hook - every resolved prediction is shareable), and use the identity card share loop (@theseeragent on X) for organic distribution. Post-hackathon: mainnet contract deployment, protocol partnerships for execution adapters (Agni, Merchant Moe, mETH), and the premium signal tier.
+
+**Why this is sustainable:** the cost base is an indexer + LLM explanation calls; the data moat (on-chain accuracy ledger + wallet identity graph) grows with every user action and is portable to any chain Mantle's ecosystem touches.
 
 ## Live links
 
-- Frontend: https://seer-mantle.onrender.com
+- Frontend: https://seer-frontend.onrender.com
 - Backend: https://seer-api-7mlt.onrender.com
 - Explorer (contracts): https://explorer.sepolia.mantle.xyz

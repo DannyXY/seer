@@ -3,7 +3,6 @@
    ============================================================ */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
-import { createSmartAccount } from './utils/smartAccount';
 import Landing from './pages/landing';
 import { SignalFeed } from './components/signalfeed';
 import { AgentScreen } from './pages/agentscreen';
@@ -108,7 +107,6 @@ function App() {
   const [route, setRouteState] = useState(() => routeFromPath(window.location.pathname));
   const [toast, setToast] = useState(null); // { msg, kind: 'info'|'success'|'error' }
   const [navCollapsed, setNavCollapsed] = useState(() => { try { return localStorage.getItem("seerNav") !== "0"; } catch (e) { return true; } });
-  const [smartAccount, setSmartAccount] = useState(null);
   const [connectError, setConnectError] = useState(null);
   const connectingRef = useRef(false); // lock - prevents concurrent sign prompts
 
@@ -127,7 +125,7 @@ function App() {
     connectingRef.current = true;
     setConnectError(null);
     const wallet = wallets[0];
-    const setupSmartAccount = async () => {
+    const setupConnection = async () => {
       try {
         window.privyWallet = wallet;
         if (wallet.getEthersProvider) {
@@ -141,22 +139,20 @@ function App() {
             window.privyEthersProvider = await wallet.getEthersProvider();
           }
         }
-        const smartAcc = await createSmartAccount(wallet);
-        setSmartAccount(smartAcc);
         if (window.SeerAPI) {
           await window.SeerAPI.connectWalletDirect(wallet.address);
           setConnected(true);
           setRoute("agent");
         }
       } catch (error) {
-        console.error('Error setting up smart account:', error);
+        console.error('Error connecting wallet:', error);
         setConnectError(error.message || "Could not confirm your wallet with the Seer backend.");
         showToast('Failed to connect: ' + error.message, 'error');
       } finally {
         connectingRef.current = false;
       }
     };
-    setupSmartAccount();
+    setupConnection();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [privyReady, authenticated, user, wallets, connected]);
 
@@ -257,7 +253,6 @@ function App() {
     try {
       window.privyWallet = wallet;
       if (wallet.getEthersProvider) { window.privyEthersProvider = await wallet.getEthersProvider(); }
-      await createSmartAccount(wallet);
       if (window.SeerAPI) {
         await window.SeerAPI.connectWalletDirect(wallet.address);
         setConnected(true);

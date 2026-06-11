@@ -178,7 +178,7 @@ function ConnectModal({ onClose, onConnect }) {
           <button className="btn-quiet" style={{ padding: 4 }} onClick={onClose}><Icon name="close" size={16} /></button>
         </div>
         <div className="serif" style={{ fontSize: 24, marginBottom: 4, textTransform: "uppercase", letterSpacing: "-0.02em" }}>Step inside.</div>
-        <div className="mut" style={{ fontSize: 13.5, marginBottom: 20 }}>One click. Email, social, or wallet. Seer creates a smart account for you automatically.</div>
+        <div className="mut" style={{ fontSize: 13.5, marginBottom: 20 }}>One click. Email, social, or wallet. Seer creates a Mantle wallet for you automatically.</div>
 
         {connecting ? (
           <div className="center" style={{ flexDirection: "column", padding: "26px 0", gap: 18 }}>

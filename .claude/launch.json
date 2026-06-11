@@ -4,9 +4,13 @@
     {
       "name": "frontend",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "cwd": "/Users/user/products/mantle-hackathon/seer/frontend",
-      "port": 5173
+      "port": 5173,
+      "autoPort": true
     }
   ]
 }

@@ -69,6 +69,17 @@ import { sendOnChainTx, getWalletProvider } from './onchain';
       text: "Watch my portfolio risk score. If it crosses 70, rotate 50% of mETH into USDY automatically." },
   ];
 
+  // Live deployment contract set (Mantle Sepolia). Used as a fallback until
+  // /api/contracts/addresses responds, which always reflects the backend env.
+  const FALLBACK_CONTRACTS = {
+    chain_id: 5003,
+    explorer_base: "https://explorer.sepolia.mantle.xyz",
+    arena_points: "0xC51E0DdF42F5aDf2bbBB9aB67Cd490f35D70F31d",
+    prediction_registry: "0x920Ce8b0e5A5a5C93EfcDe3dbe886a8B84EDdFB8",
+    identity_sbt: "0xBb0f5d7191F6d9884AB20AbF8a26294c7767cF63",
+    intent_registry: "0x2D99010E92b1EFf33C0A1Bc139FA85018EA3c483",
+  };
+
   const emptyIdentity = {
     wallet: "",
     archetype: "strategist",
@@ -116,6 +127,7 @@ import { sendOnChainTx, getWalletProvider } from './onchain';
     },
     SEED_SIGNALS: [],
     live: { paused: false },
+    CONTRACTS: FALLBACK_CONTRACTS,
   };
 
   const listeners = new Set();
@@ -217,6 +229,7 @@ import { sendOnChainTx, getWalletProvider } from './onchain';
       wallet: signal.related_wallet || signal.wallet || "",
       ts: ms(signal.created_at || signal.ts),
       fresh: !!signal.fresh,
+      source: signal.source_provider || signal.source || null,
     };
   }
 
@@ -232,6 +245,7 @@ import { sendOnChainTx, getWalletProvider } from './onchain';
       status,
       asset,
       executionMode,
+      onchainIntentId: intent.onchainIntentId ?? intent.onchain_intent_id ?? null,
       anchorTxHash: intent.anchorTxHash || intent.anchor_tx_hash || null,
       lastAction: status === "PAUSED" ? "Paused by you" : executionMode === "anchor_only" ? "Anchored on-chain; execution is simulation-only" : "Monitoring conditions in simulation",
       lastTs: ms(intent.created_at),
@@ -391,6 +405,10 @@ import { sendOnChainTx, getWalletProvider } from './onchain';
       pool: Number(pred.pool_points || pred.pool || 0),
       ends: ms(pred.expiry_time),
       seerSide: side,
+      status: String(pred.status || "Open"),
+      result: pred.result || null,
+      finalValue: pred.final_value ?? null,
+      onchainId: pred.onchain_prediction_id ?? null,
     };
   }
 
@@ -486,6 +504,13 @@ import { sendOnChainTx, getWalletProvider } from './onchain';
     disconnect: clearSession,
     async loadPublic() {
       update({ signalsLoading: true });
+      // Contract addresses for explorer links - fall back silently to the
+      // baked-in set when the endpoint isn't available.
+      request("/api/contracts/addresses")
+        .then((addrs) => {
+          if (addrs?.prediction_registry) update({ CONTRACTS: { ...FALLBACK_CONTRACTS, ...addrs } });
+        })
+        .catch(() => {});
       const [signalsRes, predictionsRes, leaderboardRes, recordRes] = await Promise.all([
         request("/api/signals"),
         request("/api/arena/predictions"),

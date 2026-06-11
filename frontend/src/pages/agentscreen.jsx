@@ -317,11 +317,23 @@ function railMode(intent) {
   if (intent.executionMode === "anchor_only") return { label: "Anchor only", className: "anchor" };
   return { label: "Simulation only", className: "" };
 }
+function anchorLink(intent) {
+  const contracts = window.SEER?.CONTRACTS;
+  if (intent.anchorTxHash && contracts?.explorer_base) {
+    return { href: `${contracts.explorer_base}/tx/${intent.anchorTxHash}`, label: "Anchor tx · verify" };
+  }
+  if (intent.onchainIntentId && contracts?.intent_registry) {
+    return { href: `${contracts.explorer_base}/address/${contracts.intent_registry}`, label: `Anchored on-chain #${intent.onchainIntentId} · verify` };
+  }
+  return null;
+}
+
 function RailIntent({ intent, onTrace, onToggle }) {
   const s = RAIL_STATUS[intent.status] || RAIL_STATUS.RUNNING;
   const mode = railMode(intent);
   const pnl = Number(intent.pnl);
   const hasPnl = Number.isFinite(pnl) && pnl !== 0;
+  const verify = anchorLink(intent);
   return (
     <div className="seer-rail-intent">
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
@@ -337,6 +349,15 @@ function RailIntent({ intent, onTrace, onToggle }) {
       <div style={{ fontSize: 13, fontWeight: 500, lineHeight: 1.35, marginBottom: 6 }}>{intent.summary}</div>
       <div className="faint" style={{ fontSize: 11.5, marginBottom: 8 }}>{intent.lastAction} · {relTime(intent.lastTs)}</div>
       <div className={"seer-simulation-badge " + mode.className} style={{ marginBottom: 10, display: 'inline-block' }}>{mode.label}</div>
+      {verify && (
+        <a
+          className="row gap-5 mono"
+          style={{ fontSize: 10.5, color: "var(--ink-2)", textDecoration: "none", marginBottom: 10 }}
+          href={verify.href} target="_blank" rel="noopener noreferrer"
+        >
+          <Icon name="shield" size={10} />{verify.label}<Icon name="arrow-up-right" size={9} />
+        </a>
+      )}
       <div className="row gap-6">
         <button className="seer-rail-btn" onClick={() => onTrace(intent)}>Trace</button>
         <button className="seer-rail-btn" onClick={() => onToggle(intent.id)}>{intent.status === "RUNNING" ? "Pause" : "Resume"}</button>

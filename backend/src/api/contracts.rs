@@ -10,6 +10,27 @@ use crate::{
     AppState,
 };
 
+/// Public registry of the contract addresses this deployment writes to, so
+/// the frontend can build explorer "verify on-chain" links that always match
+/// the live backend configuration.
+pub async fn addresses(State(state): State<AppState>) -> Json<Value> {
+    let contracts = &state.services.contracts;
+    let explorer_base = if state.settings.mantle_chain_id == 5000 {
+        "https://explorer.mantle.xyz"
+    } else {
+        "https://explorer.sepolia.mantle.xyz"
+    };
+    Json(json!({
+        "chain_id": state.settings.mantle_chain_id,
+        "explorer_base": explorer_base,
+        "arena_points": contracts.arena_points_address,
+        "prediction_registry": contracts.prediction_registry_address,
+        "identity_sbt": contracts.identity_sbt_address,
+        "intent_registry": contracts.intent_registry_address,
+        "approved_strategy": state.settings.approved_strategy_address,
+    }))
+}
+
 pub async fn readiness(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
     let observed_chain_id = state
         .services

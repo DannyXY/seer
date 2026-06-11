@@ -177,24 +177,44 @@
 .seer-wallet-link:hover { color: var(--volt); border-color: var(--coral-line); }
 .seer-paused { color: var(--volt); border-color: var(--coral-line); }
 
-/* ---------- Mobile ---------- */
+/* ---------- Tablet (721-1080px): keep the sidebar, reflow the right rail
+   below the feed instead of hiding its data ---------- */
 @media (max-width: 1080px) {
-  .seer-app, .seer-app.no-rail { grid-template-columns: var(--sidebar-w) 1fr; }
+  .seer-app, .seer-app.no-rail { grid-template-columns: var(--sidebar-w) 1fr; grid-template-rows: minmax(0, 1fr) auto; }
   .seer-app.nav-collapsed, .seer-app.nav-collapsed.no-rail { grid-template-columns: 66px 1fr; }
-  .seer-rail { display: none; }
+  .seer-sidebar { grid-row: 1 / -1; }
+  .seer-rail {
+    grid-column: 2; grid-row: 2;
+    border-left: none; border-top: 1px solid var(--line);
+    max-height: 42vh; overflow-y: auto;
+  }
 }
+
+/* ---------- Mobile (<=720px): bottom nav + one natural page scroll with the
+   rail content flowing after the feed ---------- */
 @media (max-width: 720px) {
   .seer-app, .seer-app.no-rail,
-  .seer-app.nav-collapsed, .seer-app.nav-collapsed.no-rail { grid-template-columns: 1fr; }
+  .seer-app.nav-collapsed, .seer-app.nav-collapsed.no-rail {
+    display: block; height: auto; min-height: 100vh; overflow: visible;
+    padding-bottom: 70px; /* clearance for the fixed bottom nav */
+  }
   .seer-sidebar {
     position: fixed; bottom: 0; left: 0; right: 0; top: auto; z-index: 50;
     flex-direction: row; padding: 8px; border-right: none; border-top: 1px solid var(--line);
+    background: var(--paper-sink);
   }
   .seer-brand, .seer-side-foot, .seer-side-top, .seer-collapse { display: none; }
   .seer-nav { flex-direction: row; width: 100%; justify-content: space-around; }
   .seer-nav-item span:not(.seer-nav-badge) { display: none; }
   .seer-nav-item.active::before { display: none; }
-  .seer-main { padding-bottom: 70px; }
+  .seer-main { overflow: visible; }
+  .seer-rail { max-height: none; overflow: visible; }
+  .seer-screen { padding-bottom: 40px; }
+  .seer-screen-head { flex-wrap: wrap; }
+  .seer-h1 { white-space: normal; }
+  /* The tall wrapped controls + gradient backdrop let cards bleed through
+     when stuck - let them scroll with the page on phones instead. */
+  .seer-feed-controls { position: static; background: none; padding: 0 0 4px; }
 }
 
 /* ---------- Settings ---------- */

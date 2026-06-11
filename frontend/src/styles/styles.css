@@ -367,7 +367,7 @@ a { color: inherit; text-decoration: none; }
    ============================================================ */
 .row { display: flex; align-items: center; }
 .col { display: flex; flex-direction: column; }
-.gap-4 { gap: 4px; } .gap-6{gap:6px;} .gap-8 { gap: 8px; } .gap-12 { gap: 12px; }
+.gap-4 { gap: 4px; } .gap-5 { gap: 5px; } .gap-6{gap:6px;} .gap-8 { gap: 8px; } .gap-10 { gap: 10px; } .gap-12 { gap: 12px; }
 .gap-16 { gap: 16px; } .gap-24 { gap: 24px; }
 .grow { flex: 1; }
 .mut { color: var(--ink-2); }
