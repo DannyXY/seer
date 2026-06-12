@@ -1239,6 +1239,7 @@ mod tests {
             mantle_rpc_url: None,
             mantle_data_rpc_url: None,
             mantle_chain_id: 5003,
+            logs_from_block: 0,
             aa_provider_stack: "safe-4337-relay-kit".to_string(),
             aa_bundler_url: None,
             aa_entry_point_address: None,

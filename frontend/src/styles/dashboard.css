@@ -177,6 +177,18 @@
 .seer-wallet-link:hover { color: var(--volt); border-color: var(--coral-line); }
 .seer-paused { color: var(--volt); border-color: var(--coral-line); }
 
+/* ---------- On-chain verify links (arena cards, record, agent rail) ----------
+   Chip treatment matching .seer-wallet-link so they read as clickable. */
+.seer-verify-link {
+  display: inline-flex; align-items: center; gap: 5px; width: fit-content;
+  font-family: var(--font-mono); font-size: 11px; color: var(--ink-2);
+  padding: 4px 9px; border-radius: var(--r-sm);
+  background: var(--card-2); border: 1px solid var(--line);
+  text-decoration: none; cursor: pointer; white-space: nowrap;
+  transition: color .15s, border-color .15s;
+}
+.seer-verify-link:hover { color: var(--volt); border-color: var(--coral-line); }
+
 /* ---------- Tablet (721-1080px): keep the sidebar, reflow the right rail
    below the feed instead of hiding its data ---------- */
 @media (max-width: 1080px) {

@@ -175,6 +175,41 @@ pub async fn resolve_due_predictions(state: &AppState) -> ArenaResolutionSummary
                     "arena: prediction resolved on-chain"
                 );
                 for entry in &entries {
+                    // Only settle entries that actually exist on-chain. A DB
+                    // entry without an on-chain stake (the user never signed
+                    // the enterPrediction tx) reverts with NO_ENTRY, and an
+                    // already-settled entry reverts with ENTRY_SETTLED.
+                    match state
+                        .services
+                        .contracts
+                        .read_onchain_entry(onchain_id, &entry.wallet_address)
+                        .await
+                    {
+                        Ok((0, _)) => {
+                            tracing::debug!(
+                                wallet = %entry.wallet_address,
+                                onchain_id,
+                                "arena: skipping settle - entry was never staked on-chain"
+                            );
+                            continue;
+                        }
+                        Ok((_, true)) => {
+                            tracing::debug!(
+                                wallet = %entry.wallet_address,
+                                onchain_id,
+                                "arena: skipping settle - entry already settled on-chain"
+                            );
+                            continue;
+                        }
+                        Ok(_) => {}
+                        Err(err) => {
+                            errors.push(format!(
+                                "entry read failed for {} on prediction {onchain_id}: {err}",
+                                entry.wallet_address
+                            ));
+                            continue;
+                        }
+                    }
                     match state
                         .services
                         .contracts

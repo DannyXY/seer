@@ -351,8 +351,8 @@ function RailIntent({ intent, onTrace, onToggle }) {
       <div className={"seer-simulation-badge " + mode.className} style={{ marginBottom: 10, display: 'inline-block' }}>{mode.label}</div>
       {verify && (
         <a
-          className="row gap-5 mono"
-          style={{ fontSize: 10.5, color: "var(--ink-2)", textDecoration: "none", marginBottom: 10 }}
+          className="seer-verify-link"
+          style={{ fontSize: 10.5, marginBottom: 10 }}
           href={verify.href} target="_blank" rel="noopener noreferrer"
         >
           <Icon name="shield" size={10} />{verify.label}<Icon name="arrow-up-right" size={9} />

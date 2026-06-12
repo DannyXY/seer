@@ -177,6 +177,20 @@ a { color: inherit; text-decoration: none; }
 }
 .seer-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--coral-wash); }
 
+/* Text input — instrument-style, matches range/toggle controls */
+.seer-input {
+  font-family: var(--font-mono);
+  font-size: 13px; color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--coral-line);
+  border-radius: 8px;
+  padding: 7px 10px; outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.seer-input::placeholder { color: var(--ink-3s); }
+.seer-input:focus { border-color: var(--volt); box-shadow: 0 0 0 3px var(--coral-wash); }
+.seer-input:disabled { cursor: not-allowed; }
+
 /* ============================================================
    Cards
    ============================================================ */

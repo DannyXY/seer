@@ -24,6 +24,24 @@ function SourceBadge({ source }) {
   );
 }
 
+// Signal wallets come from mainnet smart-money data; only render a real
+// explorer link for valid addresses (fallback-provider wallets are synthetic).
+function WalletLink({ wallet }) {
+  const valid = /^0x[0-9a-fA-F]{40}$/.test(wallet || "");
+  const label = <>{window.SEER.util.shortAddr(wallet)}<Icon name="ext" size={12} /></>;
+  if (!valid) return <span className="seer-wallet-link mono" title="Sample wallet from the fallback provider">{label}</span>;
+  return (
+    <a
+      className="seer-wallet-link mono"
+      href={`https://explorer.mantle.xyz/address/${wallet}`}
+      target="_blank" rel="noopener noreferrer"
+      title="View wallet on Mantle Explorer"
+    >
+      {label}
+    </a>
+  );
+}
+
 function SignalCard({ s, isNew, onMirror, onDismiss }) {
   const high = s.conf >= 80;
   const catColor = CAT_STYLE[s.cat].c;
@@ -48,9 +66,7 @@ function SignalCard({ s, isNew, onMirror, onDismiss }) {
             <ConfidenceBar value={s.conf} color="var(--volt)" />
           </div>
           <span className="grow" />
-          <a className="seer-wallet-link mono" title="View on explorer">
-            {window.SEER.util.shortAddr(s.wallet)}<Icon name="ext" size={12} />
-          </a>
+          <WalletLink wallet={s.wallet} />
           <div className="row gap-8">
             <button className="btn btn-ghost" style={{ padding: "8px 12px" }} onClick={() => onDismiss(s.id)}>Dismiss</button>
             <button className="btn btn-primary" style={{ padding: "8px 14px" }} onClick={() => onMirror(s)}>Mirror this<Icon name="arrow" size={15} /></button>

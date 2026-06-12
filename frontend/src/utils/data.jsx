@@ -119,6 +119,7 @@ import { sendOnChainTx, getWalletProvider } from './onchain';
     riskScore: 0,
     settings: {
       telegramAlerts: true,
+      telegramUsername: "",
       riskAlert: 70,
       confidenceAlert: 80,
       depegSensitivity: 2,

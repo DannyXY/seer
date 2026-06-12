@@ -23,8 +23,7 @@ function OnChainLink({ contracts, onchainId, label }) {
   if (!onchainId || !contracts?.prediction_registry) return null;
   return (
     <a
-      className="row gap-5 mono"
-      style={{ fontSize: 11, color: "var(--ink-2)", textDecoration: "none" }}
+      className="seer-verify-link"
       href={`${contracts.explorer_base}/address/${contracts.prediction_registry}`}
       target="_blank" rel="noopener noreferrer"
       title="SeerPredictionRegistry on Mantle Sepolia Explorer - prediction, entries, and settlement are all on-chain"
@@ -308,12 +307,12 @@ export function ArenaScreen({ showToast }) {
             </div>
             {contracts?.prediction_registry && (
               <a
-                className="row gap-5 mono"
-                style={{ fontSize: 11, color: "var(--ink-2)", textDecoration: "none", marginTop: 10 }}
+                className="seer-verify-link"
+                style={{ marginTop: 10, whiteSpace: "normal" }}
                 href={`${contracts.explorer_base}/address/${contracts.prediction_registry}`}
                 target="_blank" rel="noopener noreferrer"
               >
-                <Icon name="shield" size={11} />Every prediction & settlement is verifiable on-chain<Icon name="arrow-up-right" size={10} />
+                <Icon name="shield" size={11} />Predictions & settlements · verify on-chain<Icon name="arrow-up-right" size={10} />
               </a>
             )}
           </div>

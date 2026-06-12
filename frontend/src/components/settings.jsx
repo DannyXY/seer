@@ -11,6 +11,43 @@ function Toggle({ on, onChange }) {
   );
 }
 
+function TelegramUsernameRow({ value, disabled, onSave }) {
+  const [draft, setDraft] = useState(value || "");
+  useEffect(() => { setDraft(value || ""); }, [value]);
+
+  const commit = () => {
+    const cleaned = draft.trim().replace(/^@+/, "");
+    if (cleaned !== (value || "")) onSave(cleaned);
+  };
+
+  return (
+    <div className="seer-set-row">
+      <div className="col" style={{ gap: 3, minWidth: 0 }}>
+        <span style={{ fontSize: 14, fontWeight: 500 }}>Telegram username</span>
+        <span className="mut" style={{ fontSize: 12.5, lineHeight: 1.45 }}>
+          Where Seer delivers your alerts. Message the bot once so it can reach you.
+        </span>
+      </div>
+      <div className="row" style={{ flexShrink: 0, alignItems: "center", gap: 0, opacity: disabled ? 0.5 : 1 }}>
+        <span className="mut" style={{ fontSize: 14, paddingRight: 2 }}>@</span>
+        <input
+          type="text"
+          value={draft}
+          disabled={disabled}
+          placeholder="username"
+          spellCheck={false}
+          autoComplete="off"
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+          className="seer-input"
+          style={{ width: 150 }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function SettingRow({ title, desc, children }) {
   return (
     <div className="seer-set-row">
@@ -45,6 +82,12 @@ export function SettingsScreen() {
           <SettingRow title="Telegram alerts" desc="Seer messages you when something needs your eyes.">
             <Toggle on={settings.telegramAlerts} onChange={(v) => save({ telegramAlerts: v })} />
           </SettingRow>
+          <div className="seer-set-div" />
+          <TelegramUsernameRow
+            value={settings.telegramUsername}
+            disabled={!settings.telegramAlerts}
+            onSave={(v) => save({ telegramUsername: v })}
+          />
           <div className="seer-set-div" />
           <SettingRow title="Risk score threshold" desc={`Alert when portfolio risk crosses ${settings.riskAlert}.`}>
             <div className="row gap-10"><input type="range" min="40" max="90" value={settings.riskAlert} onChange={(e) => save({ riskAlert: +e.target.value })} className="seer-range" style={{ width: 130 }} /><span className="num" style={{ width: 28 }}>{settings.riskAlert}</span></div>

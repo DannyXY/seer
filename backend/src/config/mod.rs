@@ -26,6 +26,11 @@ pub struct Settings {
     /// deployed (Sepolia testnet).
     pub mantle_data_rpc_url: Option<String>,
     pub mantle_chain_id: u64,
+    /// Block height from which to scan contract event logs (eth_getLogs).
+    /// Mantle's public RPC caps log queries at 10 000 blocks per request, so we
+    /// chunk from here to the chain head. Set this to roughly the block where
+    /// Seer's contracts were deployed to keep recovery scans fast.
+    pub logs_from_block: u64,
     pub aa_provider_stack: String,
     pub aa_bundler_url: Option<String>,
     pub aa_entry_point_address: Option<String>,
@@ -121,6 +126,7 @@ impl Settings {
             mantle_rpc_url: env_opt("MANTLE_RPC_URL"),
             mantle_data_rpc_url: Some(env_or("MANTLE_DATA_RPC_URL", "https://rpc.mantle.xyz")),
             mantle_chain_id: env_or("MANTLE_CHAIN_ID", "5003").parse()?,
+            logs_from_block: env_or("SEER_LOGS_FROM_BLOCK", "0").parse().unwrap_or(0),
             aa_provider_stack: env_or("AA_PROVIDER_STACK", "safe-4337-relay-kit"),
             aa_bundler_url: env_opt("AA_BUNDLER_URL"),
             aa_entry_point_address: env_opt("AA_ENTRY_POINT_ADDRESS"),

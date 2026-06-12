@@ -31,6 +31,9 @@ pub struct ContractService {
     pub prediction_registry_address: Option<String>,
     pub identity_sbt_address: Option<String>,
     pub intent_registry_address: Option<String>,
+    /// First block to scan when fetching historical event logs. See
+    /// `Settings::logs_from_block`.
+    logs_from_block: u64,
     pub aa_provider_stack: String,
     pub aa_bundler_url: Option<String>,
     pub aa_entry_point_address: Option<String>,
@@ -84,6 +87,7 @@ impl ContractService {
             prediction_registry_address: settings.prediction_registry_address,
             identity_sbt_address: settings.identity_sbt_address,
             intent_registry_address: settings.intent_registry_address,
+            logs_from_block: settings.logs_from_block,
             aa_provider_stack: settings.aa_provider_stack,
             aa_bundler_url: settings.aa_bundler_url,
             aa_entry_point_address: settings.aa_entry_point_address,
@@ -376,6 +380,61 @@ impl ContractService {
         Some((to, format!("0x{}", hex_encode(&data))))
     }
 
+    /// Read the current chain head (`eth_blockNumber`).
+    async fn latest_block_number(&self, rpc_url: &str) -> anyhow::Result<u64> {
+        let response = self.rpc_call(rpc_url, "eth_blockNumber", json!([])).await?;
+        let hex = response
+            .get("result")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow::anyhow!("eth_blockNumber returned no result"))?;
+        Ok(U256::from_str_radix(hex.trim_start_matches("0x"), 16)?
+            .min(U256::from(u64::MAX))
+            .as_u64())
+    }
+
+    /// Fetch event logs for `address`/`topics` across the full history, chunking
+    /// the block range so each `eth_getLogs` call stays within the RPC's window
+    /// cap (Mantle's public RPC rejects ranges larger than 10 000 blocks).
+    /// Scans from `self.logs_from_block` to the chain head and returns every
+    /// matching log, oldest first.
+    async fn get_logs_chunked(
+        &self,
+        rpc_url: &str,
+        address: &str,
+        topics: Value,
+    ) -> anyhow::Result<Vec<Value>> {
+        // Stay safely under the 10 000-block ceiling.
+        const CHUNK: u64 = 9_000;
+        let latest = self.latest_block_number(rpc_url).await?;
+        let mut from = self.logs_from_block.min(latest);
+        let mut all: Vec<Value> = Vec::new();
+
+        while from <= latest {
+            let to = (from + CHUNK - 1).min(latest);
+            let response = self
+                .rpc_call(
+                    rpc_url,
+                    "eth_getLogs",
+                    json!([{
+                        "address": address,
+                        "topics": topics,
+                        "fromBlock": format!("0x{from:x}"),
+                        "toBlock": format!("0x{to:x}"),
+                    }]),
+                )
+                .await?;
+            if let Some(err) = response.get("error") {
+                anyhow::bail!("eth_getLogs failed for blocks {from}-{to}: {err}");
+            }
+            if let Some(logs) = response.get("result").and_then(Value::as_array) {
+                all.extend(logs.iter().cloned());
+            }
+            from = to + 1;
+        }
+
+        Ok(all)
+    }
+
     /// Fetch all IntentRegistered events for a wallet from SeerIntentRegistry.
     /// Returns (onchain_intent_id, intent_hash_hex, metadata_uri) tuples, oldest first.
     /// The updated contract emits metadataURI in the event so we can reconstruct
@@ -403,24 +462,9 @@ impl ContractService {
         let wallet_clean = wallet.trim_start_matches("0x").to_lowercase();
         let topic2 = format!("0x{:0>64}", wallet_clean);
 
-        let response = self
-            .rpc_call(
-                rpc_url,
-                "eth_getLogs",
-                serde_json::json!([{
-                    "address": to,
-                    "topics": [topic0, null, topic2],
-                    "fromBlock": "0x0",
-                    "toBlock": "latest",
-                }]),
-            )
+        let logs = self
+            .get_logs_chunked(rpc_url, to, json!([topic0, null, topic2]))
             .await?;
-
-        let empty = vec![];
-        let logs = response
-            .get("result")
-            .and_then(Value::as_array)
-            .unwrap_or(&empty);
 
         let results: Vec<(u64, String, String)> = logs
             .iter()
@@ -481,24 +525,9 @@ impl ContractService {
         let wallet_clean = wallet.trim_start_matches("0x").to_lowercase();
         let topic2 = format!("0x{:0>64}", wallet_clean);
 
-        let response = self
-            .rpc_call(
-                rpc_url,
-                "eth_getLogs",
-                serde_json::json!([{
-                    "address": to,
-                    "topics": [topic0, null, topic2],
-                    "fromBlock": "0x0",
-                    "toBlock": "latest",
-                }]),
-            )
+        let logs = self
+            .get_logs_chunked(rpc_url, to, json!([topic0, null, topic2]))
             .await?;
-
-        let empty = vec![];
-        let logs = response
-            .get("result")
-            .and_then(Value::as_array)
-            .unwrap_or(&empty);
 
         let results: Vec<(u64, u8, u64)> = logs
             .iter()
@@ -1004,6 +1033,44 @@ impl ContractService {
         let tx_hash = self.sign_and_send_tx(to_addr, calldata).await?;
         self.wait_for_receipt_success(&tx_hash).await?;
         Ok(tx_hash)
+    }
+
+    /// Read `SeerPredictionRegistry.entries(predictionId, user)` via eth_call.
+    /// Returns `(points_amount, resolved)`. A zero points amount means the user
+    /// never signed the on-chain enterPrediction tx (off-chain-only entry), so
+    /// settleEntry would revert with NO_ENTRY.
+    pub async fn read_onchain_entry(
+        &self,
+        onchain_prediction_id: u64,
+        user: &str,
+    ) -> anyhow::Result<(u64, bool)> {
+        let rpc_url = self
+            .rpc_url
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("MANTLE_RPC_URL not configured"))?;
+        let to = self
+            .prediction_registry_address
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("SEER_PREDICTION_REGISTRY_ADDRESS not configured"))?;
+        let user_addr =
+            Address::from_str(user).map_err(|e| anyhow::anyhow!("bad wallet address: {e}"))?;
+        let mut data = id("entries(uint256,address)")[..4].to_vec();
+        data.extend(encode(&[
+            Token::Uint(U256::from(onchain_prediction_id)),
+            Token::Address(user_addr),
+        ]));
+        let result = self.eth_call(rpc_url, to, &data).await?;
+        // Return data is three 32-byte words: (uint8 position, uint256 pointsAmount, bool resolved)
+        let bytes =
+            ethers_core::utils::hex::decode(result.trim_start_matches("0x")).unwrap_or_default();
+        if bytes.len() < 96 {
+            return Ok((0, false));
+        }
+        let points = U256::from_big_endian(&bytes[32..64])
+            .min(U256::from(u64::MAX))
+            .as_u64();
+        let resolved = bytes[64..96].iter().any(|b| *b != 0);
+        Ok((points, resolved))
     }
 
     /// Backend-signed: call `SeerPredictionRegistry.settleEntry()` to release a
